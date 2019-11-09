@@ -1,4 +1,5 @@
 import { types } from 'util'
+import { EventEmitter } from 'events'
 const { isPromise } = types
 
 export interface Funnel<T> {
@@ -172,6 +173,17 @@ test.sink((t: number) => new Promise((resolve) => {
 	}, 750)
 }))
 
-export default function<T> (funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T> {
-	return new RedioStart(funnel, options)
+export default function<T> (stream: ReadableStream<T>): RedioPipe<T>
+export default function<T> (e: EventEmitter, eventName: string, options?: RedioOptions): RedioPipe<T>
+export default function<T> (data: Array<T>, options?: RedioOptions): RedioPipe<T>
+export default function<T> (url: string, options?: RedioOptions): RedioPipe<T>
+export default function<T> (funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T>
+export default function<T> (
+	args1: Funnel<T> | string | Array<T> | EventEmitter | ReadableStream<T>,
+	args2?: RedioOptions | string,
+	args3?: RedioOptions): RedioPipe<T> {
+
+	if (typeof args1 === 'function') {
+		return new RedioStart(args1 as Funnel<T>, args2 as RedioOptions | undefined)
+	}
 }
