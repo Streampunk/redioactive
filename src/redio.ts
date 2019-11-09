@@ -1,32 +1,51 @@
-export interface PromiseMaker<T> {
-	(): Promise<T>
+import { types } from 'util'
+const { isPromise } = types
+
+export interface Funnel<T> {
+	(): Promise<T> | T
 }
 
-export interface PromiseMiddler<S, T> {
-	(s: S): Promise<T>
+export interface Valve<S, T> {
+	(s: S): Promise<T> | T
 }
 
-export interface PromiseSinker<T> {
-	(t: T): Promise<void>
+export interface Spout<T> {
+	(t: T): Promise<void> | void
 }
 
-let bufferSizeMax = 10
+export interface RedioOptions {
+	bufferSizeMax?: number
+	drainFactor?: number
+}
 
-export class RedioStream<T> {
-	private _follow: RedioEnd<T> | RedioSink<T> | null = null
+class RedioPipe<T> {
+	private _follow: RedioPipe<T> | RedioSink<T> | null = null
 	private _buffer: T[] = []
 	protected _running: boolean = true
+	private _bufferSizeMax: number = 10
+	private _drainFactor: number = 0.7
 
-	push (x: T) {
+	constructor (options?: RedioOptions) {
+		if (options) {
+			if (typeof options.bufferSizeMax === 'number' && options.bufferSizeMax > 0) {
+				this._bufferSizeMax = options.bufferSizeMax
+			}
+			if (typeof options.drainFactor === 'number' && options.drainFactor >= 0.0 && options.drainFactor <= 1.0) {
+				this._drainFactor = options.drainFactor
+			}
+		}
+	}
+
+	push (x: T): void {
 		this._buffer.push(x)
 		console.log('Push', x, this._buffer.length)
-		if (this._buffer.length >= bufferSizeMax) this._running = false
+		if (this._buffer.length >= this._bufferSizeMax) this._running = false
 		if (this._follow) this._follow.next()
 	}
 
 	pull (): T | null {
 		let val = this._buffer.shift()
-		if (!this._running && this._buffer.length < 0.7 * bufferSizeMax) {
+		if (!this._running && this._buffer.length < this._drainFactor * this._bufferSizeMax) {
 			this._running = true
 			this.next()
 		}
@@ -35,27 +54,26 @@ export class RedioStream<T> {
 
 	next (): Promise<void> { return Promise.resolve() }
 
-	map<M> (mapper: PromiseMiddler<T, M>): RedioMiddle<T, M> {
+	map<M> (mapper: Valve<T, M>): RedioMiddle<T, M> {
 		let redm = new RedioMiddle(this, mapper)
 		return redm
 	}
 
-	sink (sinker: PromiseSinker<T>) {
+	sink (sinker: Spout<T>) {
 		this._follow = new RedioSink<T>(this, sinker)
 		return this._follow
 	}
 
-	each (dotoall: (x: T) => void) {
-		this._follow = new RedioEnd<T>(this, dotoall)
-		return this._follow
+	each (dotoall: (t: T) => void) {
+		return this.sink(dotoall)
 	}
 }
 
-export class RedioStart<T> extends RedioStream<T> {
-	private _maker: PromiseMaker<T>
+class RedioStart<T> extends RedioPipe<T> {
+	private _maker: Funnel<T>
 
-	constructor (maker: PromiseMaker<T>) {
-		super()
+	constructor (maker: Funnel<T>, options?: RedioOptions) {
+		super(options)
 		this._maker = maker
 		this.next()
 	}
@@ -70,16 +88,22 @@ export class RedioStart<T> extends RedioStream<T> {
 
 }
 
-export class RedioMiddle<S, T> extends RedioStream<T> {
-	private _middler: PromiseMiddler<S, T>
-	private _ready: boolean = true
-	private _prev: RedioStream<S>
+function isAPromise<T> (o: any): o is Promise<T> {
+	return isPromise(o)
+}
 
-	constructor (prev: RedioStream<S>, middler: PromiseMiddler<S, T>) {
+class RedioMiddle<S, T> extends RedioPipe<T> {
+	private _middler: Valve<S, T>
+	private _ready: boolean = true
+	private _prev: RedioPipe<S>
+
+	constructor (prev: RedioPipe<S>, middler: Valve<S, T>) {
 		super()
 		this._middler = (s: S) => new Promise<T>((resolve, reject) => {
 			this._ready = false
-			middler(s).then((t: T) => {
+			let callIt = middler(s)
+			let promisy = isAPromise(callIt) ? callIt : Promise.resolve(callIt)
+			promisy.then((t: T) => {
 				this._ready = true
 				resolve(t)
 				this.next()
@@ -104,38 +128,21 @@ export class RedioMiddle<S, T> extends RedioStream<T> {
 	}
 }
 
-export class RedioEnd<T> {
-	private _dotoall: (x: T) => any
-	private _prev: RedioStream<T>
-
-	constructor (prev: RedioStream<T>, dotoall: (x: T) => void) {
-		this._dotoall = dotoall
-		this._prev = prev
-		this.next()
-	}
-
-	next () {
-		let v: T | null = this._prev.pull()
-		// console.log('End next', v)
-		if (v) {
-			this._dotoall(v)
-		}
-	}
-}
-
-export class RedioSink<T> {
-	private _sinker: (x: T) => Promise<T>
-	private _prev: RedioStream<T>
+class RedioSink<T> {
+	private _sinker: Spout<T>
+	private _prev: RedioPipe<T>
 	private _ready: boolean = true
 
-	constructor (prev: RedioStream<T>, sinker: PromiseSinker<T>) {
-		this._sinker = (t: T) => new Promise<T>((resolve, reject) => {
+	constructor (prev: RedioPipe<T>, sinker: Spout<T>) {
+		this._sinker = (t: T) => new Promise<void>((resolve, reject) => {
 			this._ready = false
-			sinker(t).then(() => {
+			let callIt = sinker(t)
+			let promisy = isAPromise(callIt) ? callIt : Promise.resolve(callIt)
+			promisy.then(() => {
 				this._ready = true
 				resolve()
 				this.next()
-			}, err => {
+			}, (err?: any) => {
 				this._ready = true
 				reject(err)
 				this.next()
@@ -164,3 +171,7 @@ test.sink((t: number) => new Promise((resolve) => {
 		resolve()
 	}, 750)
 }))
+
+export default function<T> (funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T> {
+	return new RedioStart(funnel, options)
+}
