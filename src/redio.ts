@@ -37,14 +37,14 @@ class RedioPipe<T> {
 		}
 	}
 
-	push (x: T): void {
+	protected push (x: T): void {
 		this._buffer.push(x)
 		console.log('Push', x, this._buffer.length)
 		if (this._buffer.length >= this._bufferSizeMax) this._running = false
 		if (this._follow) this._follow.next()
 	}
 
-	pull (): T | null {
+	protected pull (): T | null {
 		let val = this._buffer.shift()
 		if (!this._running && this._buffer.length < this._drainFactor * this._bufferSizeMax) {
 			this._running = true
@@ -55,9 +55,33 @@ class RedioPipe<T> {
 
 	next (): Promise<void> { return Promise.resolve() }
 
-	map<M> (mapper: Valve<T, M>): RedioMiddle<T, M> {
+	map<M> (mapper: Valve<T, M>, _options?: RedioOptions): RedioMiddle<T, M> {
 		let redm = new RedioMiddle(this, mapper)
 		return redm
+	}
+
+	filter (_filter: (t: T) => Promise<boolean> | boolean, _options?: RedioOptions): RedioPipe<T> {
+		throw new Error('Not implemented')
+	}
+
+	flatMap<M> (_mapper: (t: T) => RedioPipe<M>, _options?: RedioOptions): RedioPipe<M> {
+		throw new Error('Not implemented')
+	}
+
+	drop (_count: number, _options?: RedioOptions): RedioPipe<T> {
+		throw new Error('Not implemented')
+	}
+
+	take (_count: number, _options?: RedioOptions): RedioPipe<T> {
+		throw new Error('Not implemented')
+	}
+
+	observe (_options?: RedioOptions): { observer: RedioPipe<T>, source: RedioPipe<T> } {
+		throw new Error('Not implemented')
+	}
+
+	split (_options?: RedioOptions): { first: RedioPipe<T>, second: RedioPipe<T> } {
+		throw new Error('Not implemented')
 	}
 
 	sink (sinker: Spout<T>) {
@@ -67,6 +91,14 @@ class RedioPipe<T> {
 
 	each (dotoall: (t: T) => void) {
 		return this.sink(dotoall)
+	}
+
+	toArray (): Array<T> { throw new Error('Not implemented') }
+
+	toPromise (): Promise<T> { throw new Error('Not implemented') }
+
+	pipe (_stream: WritableStream<T>) {
+		throw new Error('Not implemented')
 	}
 }
 
