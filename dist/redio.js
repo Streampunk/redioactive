@@ -2,6 +2,15 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const util_1 = require("util");
 const { isPromise } = util_1.types;
+exports.end = {};
+function isEnd(t) {
+    return t === exports.end;
+}
+exports.isEnd = isEnd;
+function literal(o) {
+    return o;
+}
+exports.literal = literal;
 class RedioPipe {
     constructor(options) {
         this._follow = null;
@@ -9,6 +18,7 @@ class RedioPipe {
         this._running = true;
         this._bufferSizeMax = 10;
         this._drainFactor = 0.7;
+        this._debug = false;
         if (options) {
             if (typeof options.bufferSizeMax === 'number' && options.bufferSizeMax > 0) {
                 this._bufferSizeMax = options.bufferSizeMax;
@@ -16,11 +26,16 @@ class RedioPipe {
             if (typeof options.drainFactor === 'number' && options.drainFactor >= 0.0 && options.drainFactor <= 1.0) {
                 this._drainFactor = options.drainFactor;
             }
+            if (typeof options.debug === 'boolean') {
+                this._debug = options.debug;
+            }
         }
     }
     push(x) {
         this._buffer.push(x);
-        console.log('Push', x, this._buffer.length);
+        if (this._debug) {
+            console.log(`Push: new buffer length=${this._buffer.length} value=${x}`);
+        }
         if (this._buffer.length >= this._bufferSizeMax)
             this._running = false;
         if (this._follow)
@@ -35,16 +50,82 @@ class RedioPipe {
         return val ? val : null;
     }
     next() { return Promise.resolve(); }
-    map(mapper) {
+    append(v, options) {
+        return new RedioMiddle(this, (t) => {
+            if (this._debug) {
+                console.log(`Append at end ${isEnd(t)} value ${t}`);
+            }
+            if (isEnd(t)) {
+                return v;
+            }
+            return t;
+        }, options);
+    }
+    map(mapper, _options) {
         let redm = new RedioMiddle(this, mapper);
         return redm;
     }
-    sink(sinker) {
-        this._follow = new RedioSink(this, sinker);
+    filter(_filter, _options) {
+        throw new Error('Not implemented');
+    }
+    flatMap(_mapper, _options) {
+        throw new Error('Not implemented');
+    }
+    drop(_count, _options) {
+        throw new Error('Not implemented');
+    }
+    take(_count, _options) {
+        throw new Error('Not implemented');
+    }
+    observe(_options) {
+        throw new Error('Not implemented');
+    }
+    split(_options) {
+        throw new Error('Not implemented');
+    }
+    valve(valve) {
+        this._follow = new RedioMiddle(this, valve);
         return this._follow;
     }
-    each(dotoall) {
-        return this.sink(dotoall);
+    spout(spout, options) {
+        this._follow = new RedioSink(this, spout, options);
+        return this._follow;
+    }
+    each(dotoall, options) {
+        return this.spout((tt) => {
+            if (isEnd(tt)) {
+                if (this._debug) {
+                    console.log('Each: THE END');
+                }
+                return;
+            }
+            dotoall(tt);
+        }, options);
+    }
+    async toArray() {
+        let result = [];
+        let promisedArray = new Promise((resolve, _reject) => {
+            this.spout((tt) => {
+                if (isEnd(tt)) {
+                    resolve(result);
+                }
+                else {
+                    result.push(tt);
+                }
+            });
+        });
+        return promisedArray;
+    }
+    toPromise() { throw new Error('Not implemented'); }
+    pipe(_stream) {
+        throw new Error('Not implemented');
+    }
+    get options() {
+        return literal({
+            bufferSizeMax: this._bufferSizeMax,
+            drainFactor: this._drainFactor,
+            debug: this._debug
+        });
     }
 }
 class RedioStart extends RedioPipe {
@@ -57,7 +138,8 @@ class RedioStart extends RedioPipe {
         if (this._running) {
             let result = await this._maker();
             this.push(result);
-            this.next();
+            if (result !== exports.end)
+                this.next();
         }
     }
 }
@@ -65,8 +147,8 @@ function isAPromise(o) {
     return isPromise(o);
 }
 class RedioMiddle extends RedioPipe {
-    constructor(prev, middler) {
-        super();
+    constructor(prev, middler, options) {
+        super(Object.assign(prev.options, options));
         this._ready = true;
         this._middler = (s) => new Promise((resolve, reject) => {
             this._ready = false;
@@ -96,8 +178,10 @@ class RedioMiddle extends RedioPipe {
     }
 }
 class RedioSink {
-    constructor(prev, sinker) {
+    constructor(prev, sinker, options) {
         this._ready = true;
+        this._thatsAllFolks = null;
+        this._debug = options && typeof options.debug === 'boolean' ? options.debug : prev.options.debug;
         this._sinker = (t) => new Promise((resolve, reject) => {
             this._ready = false;
             let callIt = sinker(t);
@@ -105,11 +189,17 @@ class RedioSink {
             promisy.then(() => {
                 this._ready = true;
                 resolve();
-                this.next();
+                if (!isEnd(t)) {
+                    this.next();
+                }
+                else if (this._thatsAllFolks) {
+                    this._thatsAllFolks();
+                }
             }, (err) => {
                 this._ready = true;
                 reject(err);
-                this.next();
+                if (!isEnd(t))
+                    this.next();
             });
         });
         this._prev = prev;
@@ -122,18 +212,31 @@ class RedioSink {
             }
         }
     }
+    done(thatsAllFolks) {
+        this._thatsAllFolks = thatsAllFolks;
+        return this;
+    }
 }
-let counter = 0;
-let test = new RedioStart(() => new Promise((resolve) => setTimeout(() => resolve(counter++), Math.random() * 1000)));
-test.sink((t) => new Promise((resolve) => {
-    console.log('Starting to process slow coach', t);
-    setTimeout(() => {
-        console.log('Ending the slow coach', t);
-        resolve();
-    }, 750);
-}));
-function default_1(funnel, options) {
-    return new RedioStart(funnel, options);
+// export default function<T> (url: string, options?: RedioOptions): RedioPipe<T>
+// export default function<T> (funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T>
+function default_1(args1, args2, _args3) {
+    // if (typeof args1 === 'function') {
+    // 	return new RedioStart(args1 as Funnel<T>, args2 as RedioOptions | undefined)
+    // }
+    if (Array.isArray(args1)) {
+        let index = 0;
+        let options = args2;
+        return new RedioStart(() => {
+            if (options && options.debug) {
+                console.log(`Generating index=${index} value=${index < args1.length ? args1[index] : 'THE END'}`);
+            }
+            if (index >= args1.length) {
+                return exports.end;
+            }
+            return args1[index++];
+        }, options);
+    }
+    return null;
 }
 exports.default = default_1;
 //# sourceMappingURL=redio.js.map
