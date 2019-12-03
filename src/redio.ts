@@ -1,28 +1,103 @@
+/**
+ *  Redioactive is a reactive streams library for Node.js, designed to work
+ *  with native promises and typescript types. The motivation for its development is for the processing
+ *  of media streams at or faster than real time on non-real time computer systems.
+ *  Designed for the _async/await with typescript generation_, this library is
+ *  inspired by Highland.js and adds support for configurable buffers at each stage.
+ */
+
 import { types } from 'util'
 import { EventEmitter } from 'events'
 const { isPromise } = types
 
+/** Type of a value sent down a stream to indicate that it has ended. No values
+ *  should follow.
+ */
 export type RedioEnd = {}
+/** Constant value indicating the [[RedioEnd|end]] of a stream. */
 export const end: RedioEnd = {}
-export function isEnd (t: RedioEnd): t is RedioEnd {
+/**
+ *  Test that a value is the end of a stream.
+ *  @param t Value to test.
+ *  @return True is the value is the end of a stream.
+ */
+export function isEnd (t: any): t is RedioEnd {
 	return t === end
 }
 
+/** Empty value. Nil values are sent down streams to indicate no value in the
+ *  stream at this time. Nil values will be dropped at the earliest opportunity
+ *  and should never be received at the end of a stream.
+ *
+ *  Nil values can be used in processing stages that consume more values than they
+ *  produce.
+ */
 export type RedioNil = {}
+/** Constant representing a [[RedioNil|nil]] value. */
 export const nil: RedioNil = {}
-export function isNil (t: RedioNil): t is RedioNil {
+/**
+ *  Test a value to see if it is an [[RedioNil|empty value]].
+ *  @param t Value to test.
+ *  @return True if the value is the _nil_ empty value.
+ */
+export function isNil (t: any): t is RedioNil {
 	return t === nil
 }
 
+/** Types of values that can flow down a stream. Values are either of the given
+ *  type, the [[end]] or [[nil]].
+ */
+export type Liquid<T> = T | RedioEnd | RedioNil | Error
+/** A collection of values that can flow down a stream. This type is used
+ *  when a processing stage produces more than it consumes, a _one-to-many_
+ *  function, to represent a sequence of values to be flattenned into the stream.
+ */
+export type LotsOfLiquid<T> = Liquid<T> | Array<Liquid<T>>
+
+/**
+ *  A function that can be used to produce a stream of items that is
+ *  poured into a stream via a funnel.
+ *  @typeparam T Type of the items produced.
+ */
 export interface Funnel<T> {
-	(): Promise<T | Array<T> | RedioEnd> | T | Array<T> | RedioEnd
+	/**
+	 *  Thunk that generates values for a stream. Each call to the function
+	 *  should create one or more values that are sent on down the stream. THE
+	 *  function should generate an [[end]] value once completed.
+	 *  @return Promise to produce item(s) or the direct production of item(s).
+	 */
+	(): Promise<LotsOfLiquid<T>> | LotsOfLiquid<T>
 }
 
+/**
+ *  A funciton that can be used to process an incoming stream of liquid and
+ *  create a possibly different kind of stream of liquid.
+ *  @typeparam S Source type for the itemsconsumed.
+ *  @typeparam T Target type for items produced.
+ */
 export interface Valve<S, T> {
-	(s: S | RedioEnd): Promise<T | Array<T> | RedioEnd> | T | Array<T> | RedioEnd | RedioNil
+	/**
+	 *  A function that consumes a single item from an incoming stream and produces
+	 *  values for an outgoing stream. The function an return [[nil]] if the
+	 *  input produces no output. Set the [[RedioOptions.oneToMany]] flag if the
+	 *  funciton can produce more than one value per input and the output Will
+	 *  be flattenned.
+	 *  @param s Single item to consume.
+	 *  @return Promise to produce item(s) or the direct production of item(s).
+	 */
+	(s: S | RedioEnd): Promise<LotsOfLiquid<T>> | LotsOfLiquid<T>
 }
 
+/**
+ *  Function at the end of a pipe for handling the output of a stream.
+ *  @typeparam T Type of items at the end of the stream.
+ */
 export interface Spout<T> {
+	/**
+	 *  A function that consumes a single item at the end of a stream, executing
+	 *  a side effect or operation that acts on the value.
+	 *  @param t Item to consume.
+	 */
 	(t: T | RedioEnd): Promise<void> | void
 }
 
@@ -30,19 +105,53 @@ export interface Generator<T> {
 	(push: (t: T | RedioEnd | Error) => void, next: () => void): void
 }
 
+/**
+ *  Utility function to create literal values of stream items.
+ *  @typeparam T Type of value to create.
+ *  @param t Value describing the literal to create.
+ *  @return Literal value.
+ */
 export function literal<T> (o: T) {
 	return o
 }
 
+/**
+ *  Options that can be used to configure each stage of processing. The options
+ *  implicitly pass onto the next processing stage unless explicitly overidden.
+ *  For example, setting the `debug` flag to true on the first element will cause
+ *  all subsequent stages of processing to generate debug unless subsequently
+ *  set to false.
+ */
 export interface RedioOptions {
+	/** Maximum number of stream items to buffer before pausing the producer. */
 	bufferSizeMax?: number
+	/** Factor applied to `maxBufferSize` to apply to determine
+	 *  how many elements have to drain before the stream is
+	 *  restarted after pausing. For example, `drainFactor` is `0.7`, `bufferSizeMax`
+	 *  is `10`, processing is restarted when the buffer size has drained to a
+	 *  size of `7`.
+	 */
 	drainFactor?: number
+	/** Set this flag to enerate debugging information for this. */
 	debug?: boolean
+	/** Set this flag if the stage can produce arrays of output values
+	 *  ([[LotsOfLiquid]]) that should be flattenned.
+	 */
 	oneToMany?: boolean
 }
 
-abstract class RedioPipe<T> {
-	protected _follow: RedioPipe<any> | RedioSink<T> | null = null
+export interface RedioPipe<T> {
+	append (v: Promise<T> | T, options?: RedioOptions): RedioPipe<T>
+	map<M> (mapper: (t: T) => Promise<M> | M, options?: RedioOptions): RedioPipe<M>
+	filter (filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
+	drop (num: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
+	take (num: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
+	each (dotoall: (t: T) => void, options?: RedioOptions): RedioStream<T>
+	toArray (options?: RedioOptions): Promise<Array<T>>
+}
+
+abstract class RedioProducer<T> implements RedioPipe<T> {
+	protected _follow: RedioProducer<any> | RedioSink<T> | null = null
 	protected _buffer: (T | RedioEnd)[] = []
 	protected _running: boolean = true
 	protected _bufferSizeMax: number = 10
@@ -85,7 +194,7 @@ abstract class RedioPipe<T> {
 
 	next (): Promise<void> { return Promise.resolve() }
 
-	append (v: Promise<T> | T | RedioEnd, options?: RedioOptions): RedioPipe<T | RedioEnd> {
+	append (v: Promise<T> | T, options?: RedioOptions): RedioPipe<T> {
 		return this.valve((t: Promise<T> | T | RedioEnd) => {
 			if (this._debug) { console.log(`Append at end ${isEnd(t)} value ${t}`) }
 			if (isEnd(t)) { return v }
@@ -93,15 +202,15 @@ abstract class RedioPipe<T> {
 		}, options)
 	}
 
-	map<M> (mapper: (t: T) => M | Promise<M>, options?: RedioOptions): RedioPipe<M | RedioEnd> {
-		return this.valve((t: T | RedioEnd) => {
+	map<M> (mapper: (t: T) => M | Promise<M>, options?: RedioOptions): RedioPipe<M> {
+		return this.valve((t: T | RedioEnd): M | RedioEnd => {
 			if (!isEnd(t)) return mapper(t)
 			return end
 		}, options)
 	}
 
-	filter (filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T | RedioEnd> {
-		return this.valve((t: T | RedioEnd) => {
+	filter (filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T> {
+		return this.valve((t: T | RedioEnd): T | RedioEnd => {
 			if (!isEnd(t)) {
 				return filter(t) ? t : nil
 			}
@@ -113,9 +222,9 @@ abstract class RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	drop (num: number | Promise<number>, options?: RedioOptions): RedioPipe<T | RedioEnd> {
+	drop (num: number | Promise<number>, options?: RedioOptions): RedioPipe<T> {
 		let count = 0
-		return this.valve(async (t: T | RedioEnd) => {
+		return this.valve(async (t: T | RedioEnd): Promise<T | RedioEnd> => {
 			if (!isEnd(t)) {
 				return count++ >= await num ? t : nil
 			}
@@ -123,9 +232,9 @@ abstract class RedioPipe<T> {
 		}, options)
 	}
 
-	take (num: number | Promise<number>, options?: RedioOptions): RedioPipe<T | RedioEnd> {
+	take (num: number | Promise<number>, options?: RedioOptions): RedioPipe<T> {
 		let count = 0
-		return this.valve(async (t: T | RedioEnd) => {
+		return this.valve(async (t: T | RedioEnd): Promise<T | RedioEnd> => {
 			if (!isEnd(t)) {
 				return count++ < await num ? t : nil
 			}
@@ -146,12 +255,12 @@ abstract class RedioPipe<T> {
 		return this._follow as RedioPipe<S>
 	}
 
-	spout (spout: Spout<T>, options?: RedioOptions): RedioSink<T> {
+	spout (spout: Spout<T>, options?: RedioOptions): RedioStream<T> {
 		this._follow = new RedioSink<T>(this, spout, options)
 		return this._follow
 	}
 
-	each (dotoall: (t: T) => void, options?: RedioOptions): RedioSink<T> {
+	each (dotoall: (t: T) => void, options?: RedioOptions): RedioStream<T> {
 		return this.spout((tt: T | RedioEnd) => {
 			if (isEnd(tt)) {
 				if (options && options.debug) {
@@ -192,7 +301,7 @@ abstract class RedioPipe<T> {
 	}
 }
 
-class RedioStart<T> extends RedioPipe<T> {
+class RedioStart<T> extends RedioProducer<T> {
 	private _maker: Funnel<T>
 
 	constructor (maker: Funnel<T>, options?: RedioOptions) {
@@ -222,12 +331,12 @@ function isAPromise<T> (o: any): o is Promise<T> {
 	return isPromise(o)
 }
 
-class RedioMiddle<S, T> extends RedioPipe<T> {
+class RedioMiddle<S, T> extends RedioProducer<T> {
 	private _middler: Valve<S, T>
 	private _ready: boolean = true
-	private _prev: RedioPipe<S>
+	private _prev: RedioProducer<S>
 
-	constructor (prev: RedioPipe<S>, middler: Valve<S, T>, options?: RedioOptions) {
+	constructor (prev: RedioProducer<S>, middler: Valve<S, T>, options?: RedioOptions) {
 		super(Object.assign(prev.options, options))
 		this._middler = (s: S | RedioEnd) => new Promise<T | RedioEnd>((resolve, reject) => {
 			this._ready = false
@@ -278,14 +387,18 @@ class RedioMiddle<S, T> extends RedioPipe<T> {
 	}
 }
 
-class RedioSink<T> {
+export interface RedioStream<T> {
+	done (thatsAllFolks: () => void): RedioStream<T>
+}
+
+class RedioSink<T> implements RedioStream<T> {
 	private _sinker: Spout<T>
-	private _prev: RedioPipe<T>
+	private _prev: RedioProducer<T>
 	private _ready: boolean = true
 	private _debug: boolean
 	private _thatsAllFolks: (() => void) | null = null
 
-	constructor (prev: RedioPipe<T>, sinker: Spout<T>, options?: RedioOptions) {
+	constructor (prev: RedioProducer<T>, sinker: Spout<T>, options?: RedioOptions) {
 		this._debug = options && options.hasOwnProperty('debug') ? options.debug as boolean : prev.options.debug as boolean
 		this._sinker = (t: T | RedioEnd) => new Promise<void>((resolve, reject) => {
 			this._ready = false
@@ -317,7 +430,7 @@ class RedioSink<T> {
 		}
 	}
 
-	done (thatsAllFolks: () => void): RedioSink<T> {
+	done (thatsAllFolks: () => void): RedioStream<T> {
 		this._thatsAllFolks = thatsAllFolks
 		return this
 	}
