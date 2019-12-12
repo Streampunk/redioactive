@@ -141,10 +141,26 @@ export interface RedioOptions {
 }
 
 export interface RedioPipe<T> {
+	valve <S> (valve: Valve<T, S>, options?: RedioOptions): RedioPipe<S>
+	spout (spout: Spout<T>, options?: RedioOptions): RedioStream<T>
 	append (v: Promise<T> | T, options?: RedioOptions): RedioPipe<T>
-	map<M> (mapper: (t: T) => Promise<M> | M, options?: RedioOptions): RedioPipe<M>
-	filter (filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
+	batch (n: Promise<number> | number, options?: RedioOptions): RedioPipe<Array<T>>
+	collect (options?: RedioOptions): RedioPipe<Array<T>>
+	compact (options?: RedioOptions): RedioPipe<T>
+	consume <M> (
+		f: (err: Error, x: T, push: (m: Liquid<M>) => void, next: () => void) => Promise<void> | void,
+		options?: RedioOptions): RedioPipe<M>
+	debounce (ms: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
+	doto (f: (t: T) => Promise<void> | void, options?: RedioOptions): RedioPipe<T>
 	drop (num: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
+	errors (
+		f: (err: Error, push: (t: Liquid<T>) => void) => Promise<void> | void,
+		options?: RedioOptions): RedioPipe<T>
+	filter (filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
+	find (filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
+	// group ()
+	head (options?: RedioOptions): RedioPipe<T>
+	map<M> (mapper: (t: T) => Promise<M> | M, options?: RedioOptions): RedioPipe<M>
 	take (num: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
 	each (dotoall: (t: T) => void, options?: RedioOptions): RedioStream<T>
 	toArray (options?: RedioOptions): Promise<Array<T>>
@@ -174,6 +190,7 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 				this._oneToMany = options.oneToMany as boolean
 			}
 		}
+
 	}
 
 	protected push (x: T | RedioEnd): void {
