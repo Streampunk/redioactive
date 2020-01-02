@@ -94,7 +94,7 @@ export interface Valve<S, T> {
 	 *  @param s Single item to consume.
 	 *  @return Promise to produce item(s) or the direct production of item(s).
 	 */
-	(s: S | RedioEnd): Promise<LotsOfLiquid<T>> | LotsOfLiquid<T>
+	(s: Liquid<S>): Promise<LotsOfLiquid<T>> | LotsOfLiquid<T>
 }
 
 /**
@@ -107,7 +107,7 @@ export interface Spout<T> {
 	 *  a side effect or operation that acts on the value.
 	 *  @param t Item to consume.
 	 */
-	(t: T | RedioEnd): Promise<void> | void
+	(t: Liquid<T>): Promise<void> | void
 }
 
 export interface Generator<T> {
@@ -147,13 +147,43 @@ export interface RedioOptions {
 	 *  ([[LotsOfLiquid]]) that should be flattenned.
 	 */
 	oneToMany?: boolean
+	/** Set this flag to cause an [unhandled rejection](https://nodejs.org/api/process.html#process_event_unhandledrejection)
+	 *  at the end of the pipe. The default value is `true`. May cause the process
+	 *  to crash.
+	 */
+	rejectUnhandled?: boolean
+	/** Set this flag to allow a valve to process an error. Defaults to `false` and
+	 *  must be set for each stage that it applies to.
+	 */
+	 processError?: boolean
 }
 
 export interface RedioPipe<T> {
+	/**
+	 *  Apply a [[Valve|valve]] function to every element of the stream,
+	 *  transforming the stream from type `T` to type `S`.
+	 *  @typeparam S Type of elements on the output stream.
+	 *  @param valve   Valve function that transforms an element of an input stream
+	 *                 into zero or more elements of the output stream.
+	 *  @param options Optional options to apply at this stage.
+	 *  @returns Pipe containing the stream of transformed elements.
+	 */
 	valve <S> (valve: Valve<T, S>, options?: RedioOptions): RedioPipe<S>
+	/**
+	 *  Apply a [[Spout|spout]] function at the end of pipe.
+	 *  @param spout  Spout function to apply to each element.
+	 *  @returns A completed stream.
+	 */
 	spout (spout: Spout<T>, options?: RedioOptions): RedioStream<T>
 
 	// Transforms
+	/**
+	 *  Append a value to the end of a stream.
+	 *      redio([1, 2, 3]).append(4) // => 1, 2, 3, 4
+	 *  @param v       Value to append to end of stream.
+	 *  @param options Optional configuration.
+	 *  @returns Pipe containing stream with the additional element.
+	 */
 	append (v: Promise<T> | T, options?: RedioOptions): RedioPipe<T>
 	batch (n: Promise<number> | number, options?: RedioOptions): RedioPipe<Array<T>>
 	collect (options?: RedioOptions): RedioPipe<Array<T>>
@@ -163,10 +193,33 @@ export interface RedioPipe<T> {
 		options?: RedioOptions): RedioPipe<M>
 	debounce (ms: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
 	doto (f: (t: T) => Promise<void> | void, options?: RedioOptions): RedioPipe<T>
+	/**
+	 *  Ignores the first `num` values of the stream and emits the rest.
+	 *  @param num     Number of values to drop from the source.
+	 *  @param options Optional configuration.
+	 *  @returns Pipe containing a stream of values with the first `num` values missing.
+	 */
 	drop (num: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
+	/**
+	 *  Apply the given function to every error in the stream. All other values
+	 *  are passed on. The error can be transformed into a value of the stream
+	 *  type, passed on or dropped by returning / resolving to `void`/`null`/`undefined`.
+	 *  @param f       Function to transform an error into a value or take a side-effect
+	 *                 action. Note that errors can be passed on (return type `Error`)
+	 *                 or dropped (return type `RedioNil` or equivalent falsy value).
+	 *  @param options Optional configuration. Note the `processError` will always be set.
+	 *  @returns Stream of values with errors handled.
+	 */
 	errors (
-		f: (err: Error, push: (t: Liquid<T>) => void) => Promise<void> | void,
+		f: (err: Error) => Promise<Liquid<T>> | Liquid<T>,
 		options?: RedioOptions): RedioPipe<T>
+	/**
+	 *  Apply the given filter function to all the values in the stream, keeping
+	 *  those that pass the test.
+	 *  @param filter  Function returning true for values to keep.
+	 *  @param options Optional configuration.
+	 *  @returns Stream of values that pass the test.
+	 */
 	filter (filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
 	find (filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
 	findWhere (props: object, options?: RedioOptions): RedioPipe<T>
@@ -176,6 +229,13 @@ export interface RedioPipe<T> {
 	invoke<R> (method: string, args: Array<any>, options?: RedioOptions): RedioPipe<R>
 	last (options?: RedioOptions): RedioPipe<T>
 	latest (options?: RedioOptions): RedioPipe<T>
+	/**
+	 *  Transform a stream by applying the given `mapper` function to each element.
+	 *  @typeparam M Type of the values in the output stream.
+	 *  @param mapper  Function to transform each value.
+	 *  @param options Optional configuration.
+	 *  @returns Stream of transformed values.
+	 */
 	map<M> (mapper: (t: T) => Promise<M> | M, options?: RedioOptions): RedioPipe<M>
 	pick (properties: Array<string>, options?: RedioOptions): RedioPipe<T>
 	pickBy (f: ((key: string, value: any) => boolean), options?: RedioOptions): RedioPipe<T>
@@ -192,6 +252,12 @@ export interface RedioPipe<T> {
 	split (options?: RedioOptions): RedioPipe<T>
 	splitBy (sep: string | RegExp, options?: RedioOptions): RedioPipe<T>
 	stopOnError (f: (err: Error) => void, options?: RedioOptions): RedioPipe<T>
+	/**
+	 *  Take the first `num` elements from the stream, drop the rest.
+	 *  @param num     Number of elements to include from the start of the stream.
+	 *  @param options Optional configuration.
+	 *  @returns Stream containing only the first `num` elements from the source.
+	 */
 	take (num: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
 	tap (f: (t: T) => Promise<void> | void, options?: RedioOptions): RedioPipe<T>
 	throttle (ms: number, options?: RedioOptions): RedioPipe<T>
@@ -230,6 +296,8 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 	protected _drainFactor: number = 0.7
 	protected _debug: boolean = false
 	protected _oneToMany: boolean = false
+	protected _rejectUnhandled: boolean = true
+	protected _processError: boolean = false
 
 	constructor (options?: RedioOptions) {
 		if (options) {
@@ -244,6 +312,12 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 			}
 			if (options && options.hasOwnProperty('oneToMany')) {
 				this._oneToMany = options.oneToMany as boolean
+			}
+			if (options && options.hasOwnProperty('rejectUnhandled')) {
+				this._rejectUnhandled = options.rejectUnhandled as boolean
+			}
+			if (options && options.hasOwnProperty('processError')) {
+				this._processError = options.processError as boolean
 			}
 		}
 	}
@@ -277,7 +351,7 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 	}
 
 	append (v: Promise<T> | T, options?: RedioOptions): RedioPipe<T> {
-		return this.valve(async (t: Promise<T> | T | RedioEnd) => {
+		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
 			if (this._debug) { console.log(`Append at end ${isEnd(t)} value ${t}`) }
 			if (isEnd(t)) {
 				return v
@@ -315,7 +389,7 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 
 	drop (num: number | Promise<number>, options?: RedioOptions): RedioPipe<T> {
 		let count = 0
-		return this.valve(async (t: T | RedioEnd): Promise<T | RedioEnd> => {
+		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
 			if (!isEnd(t)) {
 				return count++ >= await num ? t : nil
 			}
@@ -324,15 +398,31 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 	}
 
 	errors (
-		_f: (err: Error, push: (t: Liquid<T>) => void) => Promise<void> | void,
-		_options?: RedioOptions): RedioPipe<T> {
-		throw new Error('Not implemented')
+		f: (err: Error) => Promise<Liquid<T>> | Liquid<T>,
+		options?: RedioOptions): RedioPipe<T> {
+		if (options) {
+			options.processError = true
+		} else {
+			options = { processError: true }
+		}
+		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
+			if (isError(t)) {
+				let result = await f(t)
+				if (typeof result === 'undefined' || typeof result === null) {
+					return nil
+				} else {
+					return result
+				}
+			} else {
+				return t
+			}
+		}, options)
 	}
 
 	filter (filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T> {
-		return this.valve((t: T | RedioEnd): T | RedioEnd => {
+		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
 			if (!isEnd(t)) {
-				return filter(t) ? t : nil
+				return (await filter(t)) ? t : nil
 			}
 			return end
 		}, options)
@@ -371,7 +461,7 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 	}
 
 	map<M> (mapper: (t: T) => M | Promise<M>, options?: RedioOptions): RedioPipe<M> {
-		return this.valve((t: T | RedioEnd): M | RedioEnd => {
+		return this.valve(async (t: Liquid<T>): Promise<Liquid<M>> => {
 			if (!isEnd(t)) return mapper(t)
 			return end
 		}, options)
@@ -439,7 +529,7 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 
 	take (num: number | Promise<number>, options?: RedioOptions): RedioPipe<T> {
 		let count = 0
-		return this.valve(async (t: T | RedioEnd): Promise<T | RedioEnd> => {
+		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
 			if (!isEnd(t)) {
 				return count++ < await num ? t : nil
 			}
@@ -558,7 +648,9 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 		return literal<RedioOptions>({
 			bufferSizeMax: this._bufferSizeMax,
 			drainFactor: this._drainFactor,
-			debug: this._debug
+			debug: this._debug,
+			rejectUnhandled: this._rejectUnhandled,
+			processError: this._processError
 		})
 	}
 }
@@ -574,15 +666,20 @@ class RedioStart<T> extends RedioProducer<T> {
 
 	async next () {
 		if (this._running) {
-			let result = await this._maker()
-			if (this._oneToMany && Array.isArray(result)) {
-				result.forEach(x => this.push(x))
-			} else if (isNil(result)) {
-				// Don't push
-			} else {
-				this.push(result)
-			}
-			if (result !== end) {
+			try {
+				let result = await this._maker()
+				if (this._oneToMany && Array.isArray(result)) {
+					result.forEach(x => this.push(x))
+				} else if (isNil(result)) {
+					// Don't push
+				} else {
+					this.push(result)
+				}
+				if (result !== end) {
+					this.next()
+				}
+			} catch (err) {
+				this.push(err)
 				this.next()
 			}
 		}
@@ -599,10 +696,13 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 	private _prev: RedioProducer<S>
 
 	constructor (prev: RedioProducer<S>, middler: Valve<S, T>, options?: RedioOptions) {
-		super(Object.assign(prev.options, options))
+		super(Object.assign(prev.options, { processError: false }, options))
 		this._middler = (s: S | RedioEnd) => new Promise<T | RedioEnd>((resolve, reject) => {
 			this._ready = false
 			let callIt = middler(s)
+			if (isError(callIt)) {
+				callIt = Promise.reject(callIt)
+			}
 			let promisy = isAPromise(callIt) ? callIt : Promise.resolve(callIt)
 			promisy.then((t: T | RedioEnd) => {
 				this._ready = true
@@ -625,25 +725,33 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 	async next () {
 		if (this._running && this._ready) {
 			let v: S | RedioEnd | null = this._prev.pull()
-			if (v !== null) {
-				let result = await this._middler(v)
-				if (this._oneToMany && Array.isArray(result)) {
-					result.forEach(x => this.push(x))
-					if (isEnd(v) && result.length > 0 && !isEnd(result[result.length - 1])) {
-						this.push(end)
-					}
-				} else if (isNil(result)) {
-					// Don't push
-					if (isEnd(v)) {
-						 this.push(end)
-					}
-				} else {
-					this.push(result)
-					if (isEnd(v) && !isEnd(result)) {
-						this.push(end)
-					}
-				}
+			if (isError(v) && !this._processError) {
+				this.push(v)
 				this.next()
+			} else if (v !== null) {
+				try {
+					let result = await this._middler(v)
+					if (this._oneToMany && Array.isArray(result)) {
+						result.forEach(x => this.push(x))
+						if (isEnd(v) && result.length > 0 && !isEnd(result[result.length - 1])) {
+							this.push(end)
+						}
+					} else if (isNil(result)) {
+						// Don't push
+						if (isEnd(v)) {
+							 this.push(end)
+						}
+					} else {
+						this.push(result)
+						if (isEnd(v) && !isEnd(result)) {
+							this.push(end)
+						}
+					}
+				} catch (err) {
+					this.push(err)
+				} finally {
+					this.next()
+				}
 			}
 		}
 	}
@@ -655,18 +763,20 @@ export interface RedioStream<T> {
 }
 
 class RedioSink<T> implements RedioStream<T> {
-	private _sinker: Spout<T>
+	private _sinker: (t: T | RedioEnd) => Promise<void>
 	private _prev: RedioProducer<T>
 	private _ready: boolean = true
 	private _debug: boolean
+	private _rejectUnhandled: boolean = true
 	private _thatsAllFolks: (() => void) | null = null
 	private _errorFn: ((err: Error) => void) | null = null
 
 	constructor (prev: RedioProducer<T>, sinker: Spout<T>, options?: RedioOptions) {
 		this._debug = options && options.hasOwnProperty('debug') ? options.debug as boolean : prev.options.debug as boolean
+		this._rejectUnhandled = options && options.hasOwnProperty('rejectUnhandled') ? options.rejectUnhandled as boolean : prev.options.rejectUnhandled as boolean
 		this._sinker = (t: T | RedioEnd) => new Promise<void>((resolve, reject) => {
 			this._ready = false
-			let callIt = sinker(t)
+			let callIt = isError(t) ? Promise.reject(t) : sinker(t)
 			let promisy = isAPromise(callIt) ? callIt : Promise.resolve(callIt)
 			promisy.then((): void => {
 				this._ready = true
@@ -677,9 +787,9 @@ class RedioSink<T> implements RedioStream<T> {
 					this._thatsAllFolks()
 				}
 			}, (err?: any): void => {
-				this._ready = true
+				// this._ready = true
 				reject(err)
-				if (!isEnd(t)) { this.next() }
+				// if (!isEnd(t)) { this.next() }
 			})
 		})
 		this._prev = prev
@@ -689,7 +799,20 @@ class RedioSink<T> implements RedioStream<T> {
 		if (this._ready) {
 			let v: T | RedioEnd | null = this._prev.pull()
 			if (v !== null) {
-				this._sinker(v)
+				this._sinker(v).catch(err => {
+					if (this._errorFn) {
+						this._errorFn(err)
+					} else {
+						if (this._debug || !this._rejectUnhandled) {
+							console.log(`Error: Unhandled error at end of chain: ${err.message}`)
+						}
+						// Will be unhandled - thrown into asynchronous nowhere
+						if (this._rejectUnhandled) {
+							console.log('Here we go!!!', this._rejectUnhandled)
+							throw err
+						}
+					}
+				})
 			}
 		}
 	}
