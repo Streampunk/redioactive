@@ -1,8 +1,9 @@
 "use strict";
 /**
  *  Redioactive is a reactive streams library for Node.js, designed to work
- *  with native promises and typescript types. The motivation for its development is for the processing
- *  of media streams at or faster than real time on non-real time computer systems.
+ *  with native promises and typescript types. The motivation for its development
+ *  is for the processing of media streams at or faster than real time on non-real
+ *  time computer systems.
  *  Designed for the _async/await with typescript generation_, this library is
  *  inspired by Highland.js and adds support for configurable buffers at each stage.
  */
@@ -36,10 +37,10 @@ exports.isNil = isNil;
  *  @param t Value to test.
  *  @return True if the value is an error.
  */
-function isError(t) {
+function isAnError(t) {
     return util_1.types.isNativeError(t);
 }
-exports.isError = isError;
+exports.isAnError = isAnError;
 /**
  *  Utility function to create literal values of stream items.
  *  @typeparam T Type of value to create.
@@ -59,6 +60,8 @@ class RedioProducer {
         this._drainFactor = 0.7;
         this._debug = false;
         this._oneToMany = false;
+        this._rejectUnhandled = true;
+        this._processError = false;
         if (options) {
             if (typeof options.bufferSizeMax === 'number' && options.bufferSizeMax > 0) {
                 this._bufferSizeMax = options.bufferSizeMax;
@@ -71,6 +74,12 @@ class RedioProducer {
             }
             if (options && options.hasOwnProperty('oneToMany')) {
                 this._oneToMany = options.oneToMany;
+            }
+            if (options && options.hasOwnProperty('rejectUnhandled')) {
+                this._rejectUnhandled = options.rejectUnhandled;
+            }
+            if (options && options.hasOwnProperty('processError')) {
+                this._processError = options.processError;
             }
         }
     }
@@ -141,13 +150,32 @@ class RedioProducer {
             return exports.end;
         }, options);
     }
-    errors(_f, _options) {
-        throw new Error('Not implemented');
+    errors(f, options) {
+        if (options) {
+            options.processError = true;
+        }
+        else {
+            options = { processError: true };
+        }
+        return this.valve(async (t) => {
+            if (isAnError(t)) {
+                let result = await f(t);
+                if (typeof result === 'undefined' || typeof result === null) {
+                    return exports.nil;
+                }
+                else {
+                    return result;
+                }
+            }
+            else {
+                return t;
+            }
+        }, options);
     }
     filter(filter, options) {
-        return this.valve((t) => {
+        return this.valve(async (t) => {
             if (!isEnd(t)) {
-                return filter(t) ? t : exports.nil;
+                return (await filter(t)) ? t : exports.nil;
             }
             return exports.end;
         }, options);
@@ -177,7 +205,7 @@ class RedioProducer {
         throw new Error('Not implemented');
     }
     map(mapper, options) {
-        return this.valve((t) => {
+        return this.valve(async (t) => {
             if (!isEnd(t))
                 return mapper(t);
             return exports.end;
@@ -259,8 +287,17 @@ class RedioProducer {
     flatFilter(_f, _options) {
         throw new Error('Not implemented');
     }
-    flatMap(_mapper, _options) {
-        throw new Error('Not implemented');
+    flatMap(mapper, options) {
+        let localOptions = Object.assign(options, { oneToMany: true });
+        return this.valve(async (t) => {
+            if (!isEnd(t)) {
+                let values = await mapper(t).toArray();
+                if (Array.length === 0)
+                    return exports.nil;
+                return values;
+            }
+            return exports.end;
+        }, localOptions);
     }
     flatten(_options) {
         throw new Error('Not implemented');
@@ -323,11 +360,16 @@ class RedioProducer {
     toNodeStream(_streamOptions, _options) {
         throw new Error('Not implemented');
     }
+    http(_uri, _options) {
+        throw new Error('Not implemented');
+    }
     get options() {
         return literal({
             bufferSizeMax: this._bufferSizeMax,
             drainFactor: this._drainFactor,
-            debug: this._debug
+            debug: this._debug,
+            rejectUnhandled: this._rejectUnhandled,
+            processError: this._processError
         });
     }
 }
@@ -339,32 +381,48 @@ class RedioStart extends RedioProducer {
     }
     async next() {
         if (this._running) {
-            let result = await this._maker();
-            if (this._oneToMany && Array.isArray(result)) {
-                result.forEach(x => this.push(x));
+            try {
+                let result = await this._maker();
+                if (this._oneToMany && Array.isArray(result)) {
+                    result.forEach(x => this.push(x));
+                }
+                else if (isNil(result)) {
+                    // Don't push
+                }
+                else {
+                    this.push(result);
+                }
+                if (result !== exports.end && !(Array.isArray(result) && result.some(isEnd))) {
+                    this.next();
+                }
             }
-            else if (isNil(result)) {
-                // Don't push
-            }
-            else {
-                this.push(result);
-            }
-            if (result !== exports.end) {
+            catch (err) {
+                this.push(err);
                 this.next();
             }
         }
     }
 }
+/**
+ *  Tests of the given value is a promise, in any state.
+ *  @param o Value to test.
+ *  @typeparam T Optional type that the promise resolves to.
+ *  @return Value is a promise?
+ */
 function isAPromise(o) {
     return isPromise(o);
 }
+exports.isAPromise = isAPromise;
 class RedioMiddle extends RedioProducer {
     constructor(prev, middler, options) {
-        super(Object.assign(prev.options, options));
+        super(Object.assign(prev.options, { processError: false }, options));
         this._ready = true;
         this._middler = (s) => new Promise((resolve, reject) => {
             this._ready = false;
             let callIt = middler(s);
+            if (isAnError(callIt)) {
+                callIt = Promise.reject(callIt);
+            }
             let promisy = isAPromise(callIt) ? callIt : Promise.resolve(callIt);
             promisy.then((t) => {
                 this._ready = true;
@@ -386,27 +444,38 @@ class RedioMiddle extends RedioProducer {
     async next() {
         if (this._running && this._ready) {
             let v = this._prev.pull();
-            if (v !== null) {
-                let result = await this._middler(v);
-                if (this._oneToMany && Array.isArray(result)) {
-                    result.forEach(x => this.push(x));
-                    if (isEnd(v) && result.length > 0 && !isEnd(result[result.length - 1])) {
-                        this.push(exports.end);
-                    }
-                }
-                else if (isNil(result)) {
-                    // Don't push
-                    if (isEnd(v)) {
-                        this.push(exports.end);
-                    }
-                }
-                else {
-                    this.push(result);
-                    if (isEnd(v) && !isEnd(result)) {
-                        this.push(exports.end);
-                    }
-                }
+            if (isAnError(v) && !this._processError) {
+                this.push(v);
                 this.next();
+            }
+            else if (v !== null) {
+                try {
+                    let result = await this._middler(v);
+                    if (this._oneToMany && Array.isArray(result)) {
+                        result.forEach(x => this.push(x));
+                        if (isEnd(v) && result.length > 0 && !isEnd(result[result.length - 1])) {
+                            this.push(exports.end);
+                        }
+                    }
+                    else if (isNil(result)) {
+                        // Don't push
+                        if (isEnd(v)) {
+                            this.push(exports.end);
+                        }
+                    }
+                    else {
+                        this.push(result);
+                        if (isEnd(v) && !isEnd(result)) {
+                            this.push(exports.end);
+                        }
+                    }
+                }
+                catch (err) {
+                    this.push(err);
+                }
+                finally {
+                    this.next();
+                }
             }
         }
     }
@@ -414,14 +483,22 @@ class RedioMiddle extends RedioProducer {
 class RedioSink {
     constructor(prev, sinker, options) {
         this._ready = true;
+        this._rejectUnhandled = true;
         this._thatsAllFolks = null;
         this._errorFn = null;
         this._debug = options && options.hasOwnProperty('debug') ? options.debug : prev.options.debug;
+        this._rejectUnhandled = options && options.hasOwnProperty('rejectUnhandled') ? options.rejectUnhandled : prev.options.rejectUnhandled;
         this._sinker = (t) => new Promise((resolve, reject) => {
             this._ready = false;
-            let callIt = sinker(t);
-            let promisy = isAPromise(callIt) ? callIt : Promise.resolve(callIt);
-            promisy.then(() => {
+            let callIt;
+            if (isAnError(t)) {
+                callIt = Promise.reject(t);
+            }
+            else {
+                callIt = sinker(t);
+            }
+            let promisy = isAPromise(callIt) ? callIt : Promise.resolve();
+            promisy.then((_value) => {
                 this._ready = true;
                 resolve();
                 if (!isEnd(t)) {
@@ -430,12 +507,10 @@ class RedioSink {
                 else if (this._thatsAllFolks) {
                     this._thatsAllFolks();
                 }
+                return Promise.resolve();
             }, (err) => {
-                this._ready = true;
+                // this._ready = true
                 reject(err);
-                if (!isEnd(t)) {
-                    this.next();
-                }
             });
         });
         this._prev = prev;
@@ -444,7 +519,21 @@ class RedioSink {
         if (this._ready) {
             let v = this._prev.pull();
             if (v !== null) {
-                this._sinker(v);
+                this._sinker(v).catch(err => {
+                    if (this._errorFn) {
+                        this._errorFn(err);
+                    }
+                    else {
+                        if (this._debug || !this._rejectUnhandled) {
+                            console.log(`Error: Unhandled error at end of chain: ${err.message}`);
+                        }
+                        // Will be unhandled - thrown into asynchronous nowhere
+                        if (this._rejectUnhandled) {
+                            console.log('Here we go!!!', this._rejectUnhandled);
+                            throw err;
+                        }
+                    }
+                });
             }
         }
     }
@@ -457,12 +546,36 @@ class RedioSink {
         return this;
     }
 }
-// export default function<T> (url: string, options?: RedioOptions): RedioPipe<T>
-// export default function<T> (funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T>
 function default_1(args1, args2, _args3) {
-    // if (typeof args1 === 'function') {
-    // 	return new RedioStart(args1 as Funnel<T>, args2 as RedioOptions | undefined)
-    // }
+    if (typeof args1 === 'function') {
+        if (args1.length === 0) { // Function is Funnel<T>
+            return new RedioStart(args1, args2);
+        }
+        // Assume function is Generator<T>
+        let funnelGenny = () => new Promise((resolve, reject) => {
+            let values = [];
+            let push = (t) => {
+                if (Array.isArray(t)) {
+                    values.concat(t);
+                }
+                else {
+                    values.push(t);
+                }
+            };
+            let next = () => {
+                resolve(values);
+            };
+            try {
+                args1(push, next);
+            }
+            catch (err) {
+                reject(err);
+            }
+        });
+        let options = args2 ? args2 : {};
+        options.oneToMany = true;
+        return new RedioStart(funnelGenny, options);
+    }
     if (Array.isArray(args1)) {
         let index = 0;
         let options = args2;

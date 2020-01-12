@@ -1,13 +1,15 @@
 /**
  *  Redioactive is a reactive streams library for Node.js, designed to work
- *  with native promises and typescript types. The motivation for its development is for the processing
- *  of media streams at or faster than real time on non-real time computer systems.
+ *  with native promises and typescript types. The motivation for its development
+ *  is for the processing of media streams at or faster than real time on non-real
+ *  time computer systems.
  *  Designed for the _async/await with typescript generation_, this library is
  *  inspired by Highland.js and adds support for configurable buffers at each stage.
  */
 
 import { types } from 'util'
 import { EventEmitter } from 'events'
+import { URL } from 'url'
 const { isPromise } = types
 
 /** Type of a value sent down a stream to indicate that it has ended. No values
@@ -49,7 +51,7 @@ export function isNil (t: any): t is RedioNil {
  *  @param t Value to test.
  *  @return True if the value is an error.
  */
-export function isError (t: any): t is Error {
+export function isAnError (t: any): t is Error {
 	return types.isNativeError(t)
 }
 
@@ -71,7 +73,7 @@ export type LotsOfLiquid<T> = Liquid<T> | Array<Liquid<T>>
 export interface Funnel<T> {
 	/**
 	 *  Thunk that generates values for a stream. Each call to the function
-	 *  should create one or more values that are sent on down the stream. THE
+	 *  should create one or more values that are sent on down the stream. This
 	 *  function should generate an [[end]] value once completed.
 	 *  @return Promise to produce item(s) or the direct production of item(s).
 	 */
@@ -110,8 +112,22 @@ export interface Spout<T> {
 	(t: Liquid<T>): Promise<void> | void
 }
 
+/**
+ *  A function that generates an item or items to push onto a stream. The
+ *  `push` function is like a standard callback function that can be called
+ *  asynchronously to push values into the stream. The generator function Will
+ *  not be called again until `next` has been called.
+ *  Note: Set `oneToMany` to true for arrays to be flattenned to a stream of
+ *  separate values.
+ *  @typeparam T Type of values to be pushed onto the stream.
+ */
 export interface Generator<T> {
-	(push: (t: T | RedioEnd | Error) => void, next: () => void): void
+	/**
+	 *  Implemented to provided the lazy generation of a stream of values.
+	 *  @param push Function called to push values onto the stream.
+	 *  @param next Call when the generator function can be called again.
+	 */
+	(push: (t: LotsOfLiquid<T>) => void, next: () => void): void
 }
 
 /**
@@ -158,6 +174,17 @@ export interface RedioOptions {
 	 processError?: boolean
 }
 
+/**
+ *  Configuration options for an endpoint that transports a stream over the
+ *  the HTTP protocol.
+ */
+export interface HTTPOptions extends RedioOptions {
+}
+
+/**
+ *  Reactive streams pipeline carrying liquid of a particular type.
+ *  @typeparam T Type of liquid travelling down the pipe.
+ */
 export interface RedioPipe<T> {
 	/**
 	 *  Apply a [[Valve|valve]] function to every element of the stream,
@@ -184,7 +211,7 @@ export interface RedioPipe<T> {
 	 *  @param options Optional configuration.
 	 *  @returns Pipe containing stream with the additional element.
 	 */
-	append (v: Promise<T> | T, options?: RedioOptions): RedioPipe<T>
+	append (v: Liquid<T>, options?: RedioOptions): RedioPipe<T>
 	batch (n: Promise<number> | number, options?: RedioOptions): RedioPipe<Array<T>>
 	collect (options?: RedioOptions): RedioPipe<Array<T>>
 	compact (options?: RedioOptions): RedioPipe<T>
@@ -285,7 +312,7 @@ export interface RedioPipe<T> {
 	toArray (options?: RedioOptions): Promise<Array<T>>
 	toCallback (f: (err: Error, value: T) => void): RedioStream<T> // Just one value
 	toNodeStream (streamOptions: object, options?: RedioOptions): ReadableStream
-
+	http (uri: string | URL, options?: HTTPOptions): RedioStream<T>
 }
 
 abstract class RedioProducer<T> implements RedioPipe<T> {
@@ -350,7 +377,7 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 		return this._follow
 	}
 
-	append (v: Promise<T> | T, options?: RedioOptions): RedioPipe<T> {
+	append (v: Liquid<T>, options?: RedioOptions): RedioPipe<T> {
 		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
 			if (this._debug) { console.log(`Append at end ${isEnd(t)} value ${t}`) }
 			if (isEnd(t)) {
@@ -406,7 +433,7 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 			options = { processError: true }
 		}
 		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
-			if (isError(t)) {
+			if (isAnError(t)) {
 				let result = await f(t)
 				if (typeof result === 'undefined' || typeof result === null) {
 					return nil
@@ -566,8 +593,17 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	flatMap<M> (_mapper: (t: T | RedioEnd) => RedioPipe<M>, _options?: RedioOptions): RedioPipe<M> {
-		throw new Error('Not implemented')
+	flatMap<M> (mapper: (t: Liquid<T>) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M> {
+		let localOptions = Object.assign(options, { oneToMany: true } as RedioOptions)
+		return this.valve(async (t: Liquid<T>): Promise<LotsOfLiquid<M>> => {
+			if (!isEnd(t)) {
+				let values = await mapper(t).append(end).toArray()
+				console.log('===', values)
+				if (Array.length === 0) return nil
+				return values
+			}
+			return end
+		}, localOptions)
 	}
 
 	flatten<F> (_options?: RedioOptions): RedioPipe<F> { // where T === Liquid<F>
@@ -644,6 +680,10 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
+	http (_uri: string | URL, _options?: RedioOptions): RedioStream<T> {
+		throw new Error('Not implemented')
+	}
+
 	get options (): RedioOptions {
 		return literal<RedioOptions>({
 			bufferSizeMax: this._bufferSizeMax,
@@ -675,8 +715,8 @@ class RedioStart<T> extends RedioProducer<T> {
 				} else {
 					this.push(result)
 				}
-				if (result !== end) {
-					this.next()
+				if (result !== end && !(Array.isArray(result) && result.some(isEnd))) {
+					process.nextTick(this.next.bind(this))
 				}
 			} catch (err) {
 				this.push(err)
@@ -686,7 +726,13 @@ class RedioStart<T> extends RedioProducer<T> {
 	}
 }
 
-function isAPromise<T> (o: any): o is Promise<T> {
+/**
+ *  Tests of the given value is a promise, in any state.
+ *  @param o Value to test.
+ *  @typeparam T Optional type that the promise resolves to.
+ *  @return Value is a promise?
+ */
+export function isAPromise<T> (o: any): o is Promise<T> {
 	return isPromise(o)
 }
 
@@ -700,7 +746,7 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 		this._middler = (s: S | RedioEnd) => new Promise<T | RedioEnd>((resolve, reject) => {
 			this._ready = false
 			let callIt = middler(s)
-			if (isError(callIt)) {
+			if (isAnError(callIt)) {
 				callIt = Promise.reject(callIt)
 			}
 			let promisy = isAPromise(callIt) ? callIt : Promise.resolve(callIt)
@@ -725,7 +771,7 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 	async next () {
 		if (this._running && this._ready) {
 			let v: S | RedioEnd | null = this._prev.pull()
-			if (isError(v) && !this._processError) {
+			if (isAnError(v) && !this._processError) {
 				this.push(v)
 				this.next()
 			} else if (v !== null) {
@@ -757,6 +803,10 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 	}
 }
 
+/**
+ *  The end of a pipeline of a reactive stream where the liquid flows out.
+ *  @typeparam T Type of liquid flowing out of the stream.
+ */
 export interface RedioStream<T> {
 	done (thatsAllFolks: () => void): RedioStream<T>
 	catch (errFn: (err: Error) => void): RedioStream<T>
@@ -776,9 +826,14 @@ class RedioSink<T> implements RedioStream<T> {
 		this._rejectUnhandled = options && options.hasOwnProperty('rejectUnhandled') ? options.rejectUnhandled as boolean : prev.options.rejectUnhandled as boolean
 		this._sinker = (t: T | RedioEnd) => new Promise<void>((resolve, reject) => {
 			this._ready = false
-			let callIt = isError(t) ? Promise.reject(t) : sinker(t)
-			let promisy = isAPromise(callIt) ? callIt : Promise.resolve(callIt)
-			promisy.then((): void => {
+			let callIt: void | Promise<void>
+			if (isAnError(t)) {
+				callIt = Promise.reject(t)
+			} else {
+				callIt = sinker(t)
+			}
+			let promisy: Promise<any> = isAPromise(callIt) ? callIt : Promise.resolve()
+			promisy.then((_value: void): Promise<void> => {
 				this._ready = true
 				resolve()
 				if (!isEnd(t)) {
@@ -786,10 +841,10 @@ class RedioSink<T> implements RedioStream<T> {
 				} else if (this._thatsAllFolks) {
 					this._thatsAllFolks()
 				}
+				return Promise.resolve()
 			}, (err?: any): void => {
 				// this._ready = true
-				reject(err)
-				// if (!isEnd(t)) { this.next() }
+				reject(err as any | undefined)
 			})
 		})
 		this._prev = prev
@@ -841,20 +896,44 @@ class RedioSink<T> implements RedioStream<T> {
 
 // export default function<T> (iterable: Iterable<T>, options?: RedioOptions): RedioPipe<T>
 // export default function<T> (iterator: Iterator<T>, options?: RedioOptions): RedioPipe<T>
-// export default function<T> (generator: Generator<T>, options?: RedioOptions): RedioPipe<T>
+export default function<T> (generator: Generator<T>, options?: RedioOptions): RedioPipe<T>
 // export default function<T> (stream: ReadableStream<T>): RedioPipe<T>
 // export default function<T> (e: EventEmitter, eventName: string, options?: RedioOptions): RedioPipe<T>
 export default function<T> (data: Array<T>, options?: RedioOptions): RedioPipe<T>
 // export default function<T> (url: string, options?: RedioOptions): RedioPipe<T>
-// export default function<T> (funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T>
+export default function<T> (funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T>
 export default function<T> (
 	args1: Funnel<T> | string | Array<T> | EventEmitter | ReadableStream<T> | Generator<T> | Iterable<T> | Iterator<T>,
 	args2?: RedioOptions | string,
 	_args3?: RedioOptions): RedioPipe<T> | null {
 
-	// if (typeof args1 === 'function') {
-	// 	return new RedioStart(args1 as Funnel<T>, args2 as RedioOptions | undefined)
-	// }
+	if (typeof args1 === 'function') {
+		if (args1.length === 0) { // Function is Funnel<T>
+			return new RedioStart<T>(args1 as Funnel<T>, args2 as RedioOptions | undefined)
+		}
+		// Assume function is Generator<T>
+		let funnelGenny: Funnel<T> = () => new Promise<LotsOfLiquid<T>>((resolve, reject) => {
+			let values: Array<Liquid<T>> = []
+			let push = (t: LotsOfLiquid<T>) => {
+				if (Array.isArray(t)) {
+					values.concat(t)
+				} else {
+					values.push(t)
+				}
+			}
+			let next = () => {
+				resolve(values)
+			}
+			try {
+				args1(push, next)
+			} catch (err) {
+				reject(err)
+			}
+		})
+		let options = args2 ? args2 as RedioOptions : {}
+		options.oneToMany = true
+		return new RedioStart<T>(funnelGenny, options)
+	}
 	if (Array.isArray(args1)) {
 		let index = 0
 		let options: RedioOptions | undefined = args2 as RedioOptions | undefined
