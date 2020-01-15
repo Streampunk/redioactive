@@ -362,7 +362,7 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 			this._running = true
 			this.next()
 		}
-		return val ? val : null
+		return val !== undefined ? val : null
 	}
 
 	next (): Promise<void> { return Promise.resolve() }
