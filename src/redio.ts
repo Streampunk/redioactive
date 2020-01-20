@@ -263,7 +263,7 @@ export interface RedioPipe<T> {
 	 *  @param options Optional configuration.
 	 *  @returns Stream of transformed values.
 	 */
-	map<M> (mapper: (t: T) => Promise<M> | M, options?: RedioOptions): RedioPipe<M>
+	map<M> (mapper: (t: T) => M | Promise<M>, options?: RedioOptions): RedioPipe<M>
 	pick (properties: Array<string>, options?: RedioOptions): RedioPipe<T>
 	pickBy (f: ((key: string, value: any) => boolean), options?: RedioOptions): RedioPipe<T>
 	pluck (prop: string, options?: RedioOptions): RedioPipe<T>
@@ -313,6 +313,8 @@ export interface RedioPipe<T> {
 	toCallback (f: (err: Error, value: T) => void): RedioStream<T> // Just one value
 	toNodeStream (streamOptions: object, options?: RedioOptions): ReadableStream
 	http (uri: string | URL, options?: HTTPOptions): RedioStream<T>
+
+	// forceEnd (options?: RedioOptions): RedioPipe<T>
 }
 
 abstract class RedioProducer<T> implements RedioPipe<T> {
@@ -410,8 +412,13 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	doto (_f: (t: T) => Promise<void> | void, _options?: RedioOptions): RedioPipe<T> {
-		throw new Error('Not implemented')
+	doto (f: (t: T) => Promise<void> | void, _options?: RedioOptions): RedioPipe<T> {
+		return this.valve((t: Liquid<T>): Liquid<T> => {
+			if (!isEnd(t)) {
+				f(t)
+			}
+			return t
+		})
 	}
 
 	drop (num: number | Promise<number>, options?: RedioOptions): RedioPipe<T> {
@@ -593,12 +600,18 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
+	// forceEnd (options?: RedioOptions): RedioPipe<T> {
+	// 	return this.valve((t: Liquid<T>): LotsOfLiquid<T> => {
+	// 		if (isEnd(t)) return [ t ]
+	// 		return [t, end]
+	// 	}, { oneToMany: true })
+	// }
+
 	flatMap<M> (mapper: (t: Liquid<T>) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M> {
 		let localOptions = Object.assign(options, { oneToMany: true } as RedioOptions)
 		return this.valve(async (t: Liquid<T>): Promise<LotsOfLiquid<M>> => {
 			if (!isEnd(t)) {
-				let values = await mapper(t).append(end).toArray()
-				console.log('===', values)
+				let values = await mapper(t).toArray()
 				if (Array.length === 0) return nil
 				return values
 			}
@@ -805,11 +818,21 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 
 /**
  *  The end of a pipeline of a reactive stream where the liquid flows out.
+ *  Methods `done`, `catch` and `toPromise` can be combined but each can
+ *  only be called once per stream. 
  *  @typeparam T Type of liquid flowing out of the stream.
  */
 export interface RedioStream<T> {
 	done (thatsAllFolks: () => void): RedioStream<T>
 	catch (errFn: (err: Error) => void): RedioStream<T>
+	/**
+	 *  Register a single promise that resolves when the stream has
+	 *  ended, returning the last value in the stream, or [[nil]] for an empty
+	 *  stream. Only call this once per stream. Use [[each]] to process each
+	 *  element of the stream.
+	 *  @returns Promise that resolves to the last value in the stream.
+	 */
+	toPromise (): Promise<Liquid<T>>
 }
 
 class RedioSink<T> implements RedioStream<T> {
@@ -820,6 +843,9 @@ class RedioSink<T> implements RedioStream<T> {
 	private _rejectUnhandled: boolean = true
 	private _thatsAllFolks: (() => void) | null = null
 	private _errorFn: ((err: Error) => void) | null = null
+	private _resolve: ((t: Liquid<T>) => void) | null = null
+	private _reject: ((err: any) => void) | null = null
+	private _last: Liquid<T> = nil
 
 	constructor (prev: RedioProducer<T>, sinker: Spout<T>, options?: RedioOptions) {
 		this._debug = options && options.hasOwnProperty('debug') ? options.debug as boolean : prev.options.debug as boolean
@@ -838,9 +864,15 @@ class RedioSink<T> implements RedioStream<T> {
 				resolve()
 				if (!isEnd(t)) {
 					this.next()
-				} else if (this._thatsAllFolks) {
-					this._thatsAllFolks()
+				} else {
+					if (this._thatsAllFolks) {
+						this._thatsAllFolks()
+					}
+					if (this._resolve) {
+						this._resolve(this._last)
+					}
 				}
+				this._last = t
 				return Promise.resolve()
 			}, (err?: any): void => {
 				// this._ready = true
@@ -855,9 +887,16 @@ class RedioSink<T> implements RedioStream<T> {
 			let v: T | RedioEnd | null = this._prev.pull()
 			if (v !== null) {
 				this._sinker(v).catch(err => {
+					let handled = false
 					if (this._errorFn) {
+						handled = true
 						this._errorFn(err)
-					} else {
+					}
+					if (this._reject) {
+						handled = true
+						this._reject(err)
+					}
+					if (!handled) {
 						if (this._debug || !this._rejectUnhandled) {
 							console.log(`Error: Unhandled error at end of chain: ${err.message}`)
 						}
@@ -880,6 +919,13 @@ class RedioSink<T> implements RedioStream<T> {
 	catch (errFn: (err: Error) => void): RedioStream<T> {
 		this._errorFn = errFn
 		return this
+	}
+
+	toPromise (): Promise<Liquid<T>> {
+		return new Promise<Liquid<T>>((resolve, reject) => {
+			this._resolve = resolve
+			this._reject = reject
+		})
 	}
 }
 

@@ -16,7 +16,7 @@ async function run () {
 	// }, { debug: true })
 	redio(async () => {
 		return counter < 6 ? counter++ : end
- 	}, { oneToMany: true })
+ 	})
 	.each(console.log, { debug: true })
 	.done(() => { console.log('There we go!') })
 }
