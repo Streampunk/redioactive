@@ -818,8 +818,9 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 
 /**
  *  The end of a pipeline of a reactive stream where the liquid flows out.
- *  Methods `done`, `catch` and `toPromise` can be combined but each can
- *  only be called once per stream. 
+ *  Methods `done`, `catch` and `toPromise` decide what happens at the end
+ *  of a stream by _registering_ a behaviour. Each can be combined but only
+ *  one of each type can be called per stream.
  *  @typeparam T Type of liquid flowing out of the stream.
  */
 export interface RedioStream<T> {
