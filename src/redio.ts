@@ -115,8 +115,9 @@ export interface Spout<T> {
 /**
  *  A function that generates an item or items to push onto a stream. The
  *  `push` function is like a standard callback function that can be called
- *  asynchronously to push values into the stream. The generator function Will
- *  not be called again until `next` has been called.
+ *  asynchronously to push values into the stream. The generator function will
+ *  not be called again until `next` has been called. Remeber to push [[end]]
+ *  to complete the stream, otherwise it is infinite.
  *  Note: Set `oneToMany` to true for arrays to be flattenned to a stream of
  *  separate values.
  *  @typeparam T Type of values to be pushed onto the stream.
@@ -295,6 +296,16 @@ export interface RedioPipe<T> {
 	// Higher order streams
 	concat (ys: RedioPipe<T> | Array<T>, options?: RedioOptions): RedioPipe<T>
 	flatFilter (f: (t: T) => RedioPipe<boolean>, options?: RedioOptions): RedioPipe<T>
+	/**
+	 *  Create a new stream of values by applying a function to each value, where
+	 *  that function returns a (possibly empty) stream. Each of the result streams
+	 *  are then emitted on a single output stream.
+	 *  Functionally equivalent to `.map<RedioPipe<M>>(f).sequence()`.
+	 *  @param f       Functions that maps values of type T to streams of type M.
+	 *  @param options Optional configuration.
+	 *  @typeparam M   Type of values contained in the output stream.
+	 *  @returns       Sequence of values from streams crated by applying `f`.
+	 */
 	flatMap<M> (f: (t: T | RedioEnd) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M>
 	flatten<F> (options?: RedioOptions): RedioPipe<F> // where T === Liquid<F>
 	fork (options?: RedioOptions): RedioPipe<T>
@@ -442,7 +453,8 @@ abstract class RedioProducer<T> implements RedioPipe<T> {
 		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
 			if (isAnError(t)) {
 				let result = await f(t)
-				if (typeof result === 'undefined' || typeof result === null) {
+				if (typeof result === 'undefined' ||
+						(typeof result === 'object' && result === null)) {
 					return nil
 				} else {
 					return result
@@ -943,11 +955,32 @@ class RedioSink<T> implements RedioStream<T> {
 
 // export default function<T> (iterable: Iterable<T>, options?: RedioOptions): RedioPipe<T>
 // export default function<T> (iterator: Iterator<T>, options?: RedioOptions): RedioPipe<T>
+/**
+ *  Create a stream of values of type `T` using a lazy [[Generator]] function. A
+ *  generator function receives callback functions `push` and `next` that it uses
+ *  to create zero or more values to push onto the stream, possibly asynchronously.
+ *  Next must be called to request that the function is called again.
+ *  @param generator Generator function.
+ *  @param options   Optional configuration.
+ *  @return Stream of values _pushed_ by the generator.
+ */
 export default function<T> (generator: Generator<T>, options?: RedioOptions): RedioPipe<T>
 // export default function<T> (stream: ReadableStream<T>): RedioPipe<T>
 // export default function<T> (e: EventEmitter, eventName: string, options?: RedioOptions): RedioPipe<T>
 export default function<T> (data: Array<T>, options?: RedioOptions): RedioPipe<T>
 // export default function<T> (url: string, options?: RedioOptions): RedioPipe<T>
+/**
+ *  Create a stream of values of type `T` using [[Funnel]] function, a _thunk_
+ *  that is called every
+ *  time the stream requires a new value. The _thunk_ maybe asynchronous and
+ *  by returning a promise to produce a value. The value will be pushed onto the
+ *  stream when the promise resolves and only then will the next value from the
+ *  stream be requested.
+ *  @param funnel  Funnel function, a thunk that synchronously or asynchronously
+ *                 generates a value.
+ *  @param options Optional configuration.
+ *  @return Stream of values created by repeatedly calling the funnel function.
+ */
 export default function<T> (funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T>
 export default function<T> (
 	args1: Funnel<T> | string | Array<T> | EventEmitter | ReadableStream<T> | Generator<T> | Iterable<T> | Iterator<T>,
