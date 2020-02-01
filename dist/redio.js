@@ -51,9 +51,17 @@ function literal(o) {
     return o;
 }
 exports.literal = literal;
-class RedioProducer {
+class RedioFitting {
+    constructor() {
+        this.fittingId = RedioFitting.counter++;
+    }
+}
+RedioFitting.counter = 0;
+class RedioProducer extends RedioFitting {
     constructor(options) {
-        this._follow = null;
+        super();
+        this._followers = [];
+        this._pullCount = 0;
         this._buffer = [];
         this._running = true;
         this._bufferSizeMax = 10;
@@ -90,25 +98,42 @@ class RedioProducer {
         }
         if (this._buffer.length >= this._bufferSizeMax)
             this._running = false;
-        if (this._follow)
-            this._follow.next();
+        this._followers.forEach(follower => follower.next());
     }
-    pull() {
-        let val = this._buffer.shift();
-        if (!this._running && this._buffer.length < this._drainFactor * this._bufferSizeMax) {
-            this._running = true;
-            this.next();
+    pull(puller) {
+        this._pullCount++;
+        if (this._debug)
+            console.log('Received pull with count ', this._pullCount, '/', this._followers.length, puller);
+        let val;
+        if (this._pullCount === this._followers.length) {
+            val = this._buffer.shift();
+            this._pullCount = 0;
+            if (!this._running && this._buffer.length < this._drainFactor * this._bufferSizeMax) {
+                this._running = true;
+                this.next();
+            }
         }
-        return val ? val : null;
+        else {
+            val = this._buffer[0];
+        }
+        return val !== undefined ? val : null;
     }
     next() { return Promise.resolve(); }
     valve(valve, options) {
-        this._follow = new RedioMiddle(this, valve, options);
-        return this._follow;
+        if (this._followers.length > 0) {
+            throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.');
+        }
+        this._followers = [new RedioMiddle(this, valve, options)];
+        this._pullCount = 0;
+        return this._followers[0];
     }
     spout(spout, options) {
-        this._follow = new RedioSink(this, spout, options);
-        return this._follow;
+        if (this._followers.length > 0) {
+            throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.');
+        }
+        this._followers = [new RedioSink(this, spout, options)];
+        this._pullCount = 0;
+        return this._followers[0];
     }
     append(v, options) {
         return this.valve(async (t) => {
@@ -138,8 +163,13 @@ class RedioProducer {
     debounce(_ms, _options) {
         throw new Error('Not implemented');
     }
-    doto(_f, _options) {
-        throw new Error('Not implemented');
+    doto(f, _options) {
+        return this.valve((t) => {
+            if (!isEnd(t)) {
+                f(t);
+            }
+            return t;
+        });
     }
     drop(num, options) {
         let count = 0;
@@ -160,7 +190,8 @@ class RedioProducer {
         return this.valve(async (t) => {
             if (isAnError(t)) {
                 let result = await f(t);
-                if (typeof result === 'undefined' || typeof result === null) {
+                if (typeof result === 'undefined' ||
+                    (typeof result === 'object' && result === null)) {
                     return exports.nil;
                 }
                 else {
@@ -302,8 +333,10 @@ class RedioProducer {
     flatten(_options) {
         throw new Error('Not implemented');
     }
-    fork(_options) {
-        throw new Error('Not implemented');
+    fork(options) {
+        let identity = new RedioMiddle(this, i => i, { bufferSizeMax: 1 });
+        this._followers.push(identity);
+        return identity;
     }
     merge(_options) {
         throw new Error('Not implemented');
@@ -327,14 +360,14 @@ class RedioProducer {
         throw new Error('Not implemented');
     }
     each(dotoall, options) {
-        return this.spout((tt) => {
+        return this.spout(async (tt) => {
             if (isEnd(tt)) {
                 if (options && options.debug) {
                     console.log('Each: THE END');
                 }
                 return;
             }
-            dotoall(tt);
+            await dotoall(tt);
         }, options);
     }
     pipe(_stream, _options) {
@@ -393,7 +426,7 @@ class RedioStart extends RedioProducer {
                     this.push(result);
                 }
                 if (result !== exports.end && !(Array.isArray(result) && result.some(isEnd))) {
-                    this.next();
+                    process.nextTick(this.next.bind(this));
                 }
             }
             catch (err) {
@@ -443,7 +476,7 @@ class RedioMiddle extends RedioProducer {
     }
     async next() {
         if (this._running && this._ready) {
-            let v = this._prev.pull();
+            let v = this._prev.pull(this);
             if (isAnError(v) && !this._processError) {
                 this.push(v);
                 this.next();
@@ -480,12 +513,16 @@ class RedioMiddle extends RedioProducer {
         }
     }
 }
-class RedioSink {
+class RedioSink extends RedioFitting {
     constructor(prev, sinker, options) {
+        super();
         this._ready = true;
         this._rejectUnhandled = true;
         this._thatsAllFolks = null;
         this._errorFn = null;
+        this._resolve = null;
+        this._reject = null;
+        this._last = exports.nil;
         this._debug = options && options.hasOwnProperty('debug') ? options.debug : prev.options.debug;
         this._rejectUnhandled = options && options.hasOwnProperty('rejectUnhandled') ? options.rejectUnhandled : prev.options.rejectUnhandled;
         this._sinker = (t) => new Promise((resolve, reject) => {
@@ -504,9 +541,15 @@ class RedioSink {
                 if (!isEnd(t)) {
                     this.next();
                 }
-                else if (this._thatsAllFolks) {
-                    this._thatsAllFolks();
+                else {
+                    if (this._thatsAllFolks) {
+                        this._thatsAllFolks();
+                    }
+                    if (this._resolve) {
+                        this._resolve(this._last);
+                    }
                 }
+                this._last = t;
                 return Promise.resolve();
             }, (err) => {
                 // this._ready = true
@@ -517,13 +560,19 @@ class RedioSink {
     }
     next() {
         if (this._ready) {
-            let v = this._prev.pull();
+            let v = this._prev.pull(this);
             if (v !== null) {
                 this._sinker(v).catch(err => {
+                    let handled = false;
                     if (this._errorFn) {
+                        handled = true;
                         this._errorFn(err);
                     }
-                    else {
+                    if (this._reject) {
+                        handled = true;
+                        this._reject(err);
+                    }
+                    if (!handled) {
                         if (this._debug || !this._rejectUnhandled) {
                             console.log(`Error: Unhandled error at end of chain: ${err.message}`);
                         }
@@ -545,7 +594,14 @@ class RedioSink {
         this._errorFn = errFn;
         return this;
     }
+    toPromise() {
+        return new Promise((resolve, reject) => {
+            this._resolve = resolve;
+            this._reject = reject;
+        });
+    }
 }
+/** Implementation of the default stream generator function. Use an override. */
 function default_1(args1, args2, _args3) {
     if (typeof args1 === 'function') {
         if (args1.length === 0) { // Function is Funnel<T>
