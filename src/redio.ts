@@ -314,6 +314,17 @@ export interface RedioPipe<T> extends PipeFitting {
 	 */
 	flatMap<M> (f: (t: T | RedioEnd) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M>
 	flatten<F> (options?: RedioOptions): RedioPipe<F> // where T === Liquid<F>
+	/**
+	 *  Split the stream into two or more separate streams with shared backpressure.
+	 *  It is the slowest conumer that regulates how fast the source stream produces
+	 *  values. Other behaviour may be best achieved using [[observe]]. Call this
+	 *  method twice or more on the source stream to create branches.
+	 *  Note that the values passed along the stream are copied by reference. Be
+	 *  aware that any side effects caused by subsequent pipeline stages on either
+	 *  branch will modify the value.
+	 *  @param options Optional configuration.
+	 *  @returns A stream that is one forked branch of the source stream.
+	 */
 	fork (options?: RedioOptions): RedioPipe<T>
 	merge<M> (options?: RedioOptions): RedioPipe<M>
 	observe (options?: RedioOptions): RedioPipe<T>
@@ -324,8 +335,25 @@ export interface RedioPipe<T> extends PipeFitting {
 	zip<Z> (ys: RedioPipe<Z> | Array<Z>, options?: RedioOptions): RedioPipe<[T, Z]>
 
 	// Consumption
-	each (dotoall: (t: T) => void | Promise<void>, options?: RedioOptions): RedioStream<T>
+	/**
+	 *  Consume the stream by executing a side-effect function on each value. For
+	 *  example, writing each value of the stream to the console or to a stream.
+	 *  @param dotoall Optional side-effect function to execute on each value. If
+	 *                 no function is provided, `() => {}` is used, discarding all
+	 *                 values. If the value returns a promise, it must resolve before
+	 *                 the function is called again, applying backpressure to the
+	 *                 stream.
+	 *  @param options Optional configuration.
+	 *  @returns The last fitting of a pipeline that consumes all the values.
+	 */
+	each (dotoall?: (t: T) => void | Promise<void>, options?: RedioOptions): RedioStream<T>
 	pipe (dest: WritableStream<T>, streamOptions: object, options?: RedioOptions): RedioStream<T>
+	/**
+	 *  Consume the stream by writing each value into an array, the resolving
+	 *  to that array.
+	 *  @param options Optional configuration.
+	 *  @returns Promise to create an array containing the final values of the stream.
+	 */
 	toArray (options?: RedioOptions): Promise<Array<T>>
 	toCallback (f: (err: Error, value: T) => void): RedioStream<T> // Just one value
 	toNodeStream (streamOptions: object, options?: RedioOptions): ReadableStream
@@ -390,7 +418,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}
 	}
 
-	pull <U> (puller: PipeFitting): T | RedioEnd | null {
+	pull (puller: PipeFitting): T | RedioEnd | null {
 		let provideVal = !this._pullCheck.has(puller.fittingId)
 		if (!provideVal) {
 			if (this._debug) {
@@ -715,7 +743,10 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	each (dotoall: (t: T) => Promise<void>, options?: RedioOptions): RedioStream<T> {
+	each (dotoall?: (t: T) => void | Promise<void>, options?: RedioOptions): RedioStream<T> {
+		if (dotoall === undefined) {
+			dotoall = (t: T): void => { /* void */ }
+		}
 		return this.spout(async (tt: T | RedioEnd) => {
 			if (isEnd(tt)) {
 				if (options && options.debug) {
@@ -723,7 +754,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 				}
 				return
 			}
-			await dotoall(tt)
+			await dotoall!(tt)
 		}, options)
 	}
 
@@ -891,7 +922,22 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
  *  @typeparam T Type of liquid flowing out of the stream.
  */
 export interface RedioStream<T> extends PipeFitting {
+	/**
+	 *  Provide a callback function that is run when the stream has ended. The
+	 *  function may be used to close any resources no longer reauired.
+	 *  If more than one done function is provided, the latest one is called.
+	 *  @param thatsAllFolks Function called at the end of the stream.
+	 *  @returns This stream so that other end-stream behaviour can be specified.
+	 */
 	done (thatsAllFolks: () => void): RedioStream<T>
+	/**
+	 *  Function that is called with any unhandled errors that have caysed the
+	 *  stream to end. If more than one catch function is provided, the latest one
+	 *  is called.
+	 *  @param errFn Funciion called with any unhandled error that has reached the
+	 *               end of the stream.
+	 *  @returns This stream so that other end-stream behaviour can be specified.
+	 */
 	catch (errFn: (err: Error) => void): RedioStream<T>
 	/**
 	 *  Register a single promise that resolves when the stream has
