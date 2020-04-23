@@ -1,8 +1,9 @@
 {
   "name": "redioactive",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Reactive streams for chaining overlapping promises.",
-  "main": "dist/index.js",
+	"main": "lib/redio.js",
+	"types": "lib/redio.d.ts",
   "repository": "https://github.com/Streampunk/redioactive.git",
   "author": "Richard Cartwright <spark@streampunk.media>",
   "license": "MIT",
