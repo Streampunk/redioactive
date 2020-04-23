@@ -1,10 +1,11 @@
-import { default as redio, LotsOfLiquid, end } from '../redio'
+import { default as redio, /*LotsOfLiquid,*/ end } from '../redio'
 
-let wait = async (t: number) => new Promise((resolve) => {
-	setTimeout(resolve, t)
-})
+// const wait = async (t: number): Promise<void> =>
+// 	new Promise((resolve) => {
+// 		setTimeout(resolve, t)
+// 	})
 
-async function run () {
+async function run(): Promise<void> {
 	let counter = 0
 	// redio(async (push: (t: LotsOfLiquid<number>) => void, next: () => void) => {
 	// 	await wait(500)
@@ -16,9 +17,11 @@ async function run () {
 	// }, { debug: true })
 	redio(async () => {
 		return counter < 6 ? counter++ : end
- 	})
-	.each(console.log, { debug: true })
-	.done(() => { console.log('There we go!') })
+	})
+		.each(console.log, { debug: true })
+		.done(() => {
+			console.log('There we go!')
+		})
 }
 
 run().catch(console.error)
