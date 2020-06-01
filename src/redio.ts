@@ -18,6 +18,7 @@ const { isPromise } = types
 /** Type of a value sent down a stream to indicate that it has ended. No values
  *  should follow.
  */
+// eslint-disable-next-line @typescript-eslint/ban-types
 export type RedioEnd = {}
 /** Constant value indicating the [[RedioEnd|end]] of a stream. */
 export const end: RedioEnd = {}
@@ -26,6 +27,7 @@ export const end: RedioEnd = {}
  *  @param t Value to test.
  *  @return True is the value is the end of a stream.
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function isEnd(t: any): t is RedioEnd {
 	return t === end
 }
@@ -37,6 +39,7 @@ export function isEnd(t: any): t is RedioEnd {
  *  Nil values can be used in processing stages that consume more values than they
  *  produce.
  */
+// eslint-disable-next-line @typescript-eslint/ban-types
 export type RedioNil = {}
 /** Constant representing a [[RedioNil|nil]] value. */
 export const nil: RedioNil = {}
@@ -45,6 +48,7 @@ export const nil: RedioNil = {}
  *  @param t Value to test.
  *  @return True if the value is the _nil_ empty value.
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function isNil(t: any): t is RedioNil {
 	return t === nil
 }
@@ -54,6 +58,7 @@ export function isNil(t: any): t is RedioNil {
  *  @param t Value to test.
  *  @return True if the value is an error.
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function isAnError(t: any): t is Error {
 	return types.isNativeError(t)
 }
@@ -258,6 +263,7 @@ export interface RedioPipe<T> extends PipeFitting {
 	 */
 	filter(filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
 	find(filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
+	// eslint-disable-next-line @typescript-eslint/ban-types
 	findWhere(props: object, options?: RedioOptions): RedioPipe<T>
 	group(f: string | ((t: T) => any), options?: RedioOptions): RedioPipe<T>
 	head(options?: RedioOptions): RedioPipe<T>
@@ -299,6 +305,7 @@ export interface RedioPipe<T> extends PipeFitting {
 	throttle(ms: number, options?: RedioOptions): RedioPipe<T>
 	uniq(options?: RedioOptions): RedioPipe<T>
 	uniqBy(f: (a: T, b: T) => boolean, options?: RedioOptions): RedioPipe<T>
+	// eslint-disable-next-line @typescript-eslint/ban-types
 	where(props: object, options?: RedioOptions): RedioPipe<T> // Filter on object properties
 
 	// Higher order streams
@@ -349,6 +356,7 @@ export interface RedioPipe<T> extends PipeFitting {
 	 *  @returns The last fitting of a pipeline that consumes all the values.
 	 */
 	each(dotoall?: (t: T) => void | Promise<void>, options?: RedioOptions): RedioStream<T>
+	// eslint-disable-next-line @typescript-eslint/ban-types
 	pipe(dest: WritableStream<T>, streamOptions: object, options?: RedioOptions): RedioStream<T>
 	/**
 	 *  Consume the stream by writing each value into an array, the resolving
@@ -358,6 +366,7 @@ export interface RedioPipe<T> extends PipeFitting {
 	 */
 	toArray(options?: RedioOptions): Promise<Array<T>>
 	toCallback(f: (err: Error, value: T) => void): RedioStream<T> // Just one value
+	// eslint-disable-next-line @typescript-eslint/ban-types
 	toNodeStream(streamOptions: object, options?: RedioOptions): ReadableStream
 	http(uri: string | URL, options?: HTTPOptions): RedioStream<T>
 
@@ -577,6 +586,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
+	// eslint-disable-next-line @typescript-eslint/ban-types
 	findWhere(_props: object, _options?: RedioOptions): RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
@@ -698,6 +708,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
+	// eslint-disable-next-line @typescript-eslint/ban-types
 	where(_props: object, _options?: RedioOptions): RedioPipe<T> {
 		// Filter on object properties
 		throw new Error('Not implemented')
@@ -808,6 +819,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
+	// eslint-disable-next-line @typescript-eslint/ban-types
 	toNodeStream(_streamOptions: object, _options?: RedioOptions): ReadableStream {
 		throw new Error('Not implemented')
 	}
@@ -864,6 +876,7 @@ class RedioStart<T> extends RedioProducer<T> {
  *  @typeparam T Optional type that the promise resolves to.
  *  @return Value is a promise?
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function isAPromise<T>(o: any): o is Promise<T> {
 	return isPromise(o)
 }
@@ -908,7 +921,7 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 		if (this._running && this._ready) {
 			const v: S | RedioEnd | null = this._prev.pull(this)
 			if (this._debug) {
-				console.log('Just called pull in value. Fitting', this.fittingId, 'value', v)
+				console.log('Just called pull in valve. Fitting', this.fittingId, 'value', v)
 			}
 			if (isAnError(v) && !this._processError) {
 				this.push(v)

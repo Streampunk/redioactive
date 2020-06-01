@@ -2,21 +2,21 @@
   "name": "redioactive",
   "version": "0.0.3",
   "description": "Reactive streams for chaining overlapping promises.",
-	"main": "lib/redio.js",
-	"types": "lib/redio.d.ts",
+  "main": "dist/redio.js",
+  "types": "dist/redio.d.ts",
   "repository": "https://github.com/Streampunk/redioactive.git",
   "author": "Richard Cartwright <spark@streampunk.media>",
   "license": "MIT",
   "private": false,
   "devDependencies": {
-    "@types/node": "^12.12.35",
-    "@typescript-eslint/eslint-plugin": "2.29.0",
-    "@typescript-eslint/parser": "^2.29.0",
-    "eslint": "^6.8.0",
+    "@types/node": "^12.12.42",
+    "@typescript-eslint/eslint-plugin": "^3.0.2",
+    "@typescript-eslint/parser": "^3.0.2",
+    "eslint": "^7.1.0",
     "eslint-config-prettier": "^6.11.0",
     "eslint-plugin-prettier": "^3.1.3",
     "prettier": "^2.0.5",
-    "ts-node": "^8.9.0",
-    "typescript": "^3.8.3"
+    "ts-node": "^8.10.2",
+    "typescript": "^3.9.3"
   }
 }
