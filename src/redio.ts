@@ -396,6 +396,10 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 
 	constructor(options?: RedioOptions) {
 		super()
+		this.setOptions(options)
+	}
+
+	protected setOptions(options?: RedioOptions) {
 		if (options) {
 			if (typeof options.bufferSizeMax === 'number' && options.bufferSizeMax > 0) {
 				this._bufferSizeMax = options.bufferSizeMax
@@ -420,6 +424,24 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 				this._processError = options.processError as boolean
 			}
 		}
+	}
+
+	addDst(nextStage: RedioProducer<any> | RedioSink<T>): void {
+		if (this._debug) {
+			console.log(`Adding a connection from fitting ${this.fittingId} to ${nextStage.fittingId}`)
+		}
+		this._followers.push(nextStage)
+	}
+
+	connectDst(nextStage: RedioProducer<any> | RedioSink<T>): void {
+		if (this._followers.length > 0) {
+			throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.')
+		}
+		if (this._debug) {
+			console.log(`Creating a connection from fitting ${this.fittingId} to ${nextStage.fittingId}`)
+		}
+		this._followers = [nextStage]
+		this._pullCheck.clear()
 	}
 
 	protected push(x: T | RedioEnd): void {
@@ -476,24 +498,16 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		return Promise.resolve()
 	}
 
-	valve<S>(valve: Valve<T, S>, options?: RedioOptions): RedioPipe<S> {
-		if (this._followers.length > 0) {
-			throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.')
-		}
-		// eslint-disable-next-line @typescript-eslint/no-use-before-define
-		this._followers = [new RedioMiddle<T, S>(this, valve, options)]
-		this._pullCheck.clear()
-		return this._followers[0] as RedioPipe<S>
+	valve<S>(middler: Valve<T, S>, options?: RedioOptions): RedioPipe<S> {
+		const result = new valve<T, S>(middler, options)
+		result.connectSrc(this)
+		return result
 	}
 
-	spout(spout: Spout<T>, options?: RedioOptions): RedioStream<T> {
-		if (this._followers.length > 0) {
-			throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.')
-		}
-		// eslint-disable-next-line @typescript-eslint/no-use-before-define
-		this._followers = [new RedioSink<T>(this, spout, options)]
-		this._pullCheck.clear()
-		return this._followers[0] as RedioStream<T>
+	spout(sinker: Spout<T>, options?: RedioOptions): RedioStream<T> {
+		const result = new spout<T>(sinker, options)
+		result.connectSrc(this)
+		return result
 	}
 
 	append(v: Liquid<T>, options?: RedioOptions): RedioPipe<T> {
@@ -741,9 +755,8 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	}
 
 	fork(options?: RedioOptions): RedioPipe<T> {
-		// eslint-disable-next-line @typescript-eslint/no-use-before-define
-		const identity = new RedioMiddle<T, T>(this, (i) => i, options)
-		this._followers.push(identity)
+		const identity = new valve<T, T>((i) => i, options)
+		identity.addSrc(this)
 		return identity
 	}
 
@@ -884,10 +897,10 @@ export function isAPromise<T>(o: any): o is Promise<T> {
 class RedioMiddle<S, T> extends RedioProducer<T> {
 	private _middler: Valve<S, T>
 	private _ready = true
-	private _prev: RedioProducer<S>
+	private _prev: RedioProducer<S> | null = null
 
-	constructor(prev: RedioProducer<S>, middler: Valve<S, T>, options?: RedioOptions) {
-		super(Object.assign(prev.options, { processError: false }, options))
+	constructor(middler: Valve<S, T>, options?: RedioOptions) {
+		super(options)
 		this._middler = (s: S | RedioEnd): Promise<T | RedioEnd> =>
 			new Promise<T | RedioEnd>((resolve, reject) => {
 				this._ready = false
@@ -914,12 +927,28 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 					}
 				)
 			})
+	}
+
+	add(prev: RedioProducer<S>): RedioPipe<T> {
+		prev.addDst(this)
+
 		this._prev = prev
+		return this
+	}
+
+	connect(prev: RedioProducer<S>, options?: RedioOptions): RedioPipe<T> {
+		this.setOptions(Object.assign(prev.options, { processError: false }, options))
+		prev.connectDst(this)
+
+		this._prev = prev
+		this.next()
+		return this
 	}
 
 	async next(): Promise<void> {
 		if (this._running && this._ready) {
-			const v: S | RedioEnd | null = this._prev.pull(this)
+			let v: S | RedioEnd | null = null
+			if (this._prev) v = this._prev.pull(this)
 			if (this._debug) {
 				console.log('Just called pull in valve. Fitting', this.fittingId, 'value', v)
 			}
@@ -948,14 +977,32 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 				} catch (err) {
 					this.push(err)
 				} finally {
-					if (this._debug) {
-						console.log('About to call next in', this.fittingId)
+					if (!isEnd(v)) {
+						if (this._debug) {
+							console.log('About to call next in', this.fittingId)
+						}
+						this.next()
+						// process.nextTick(() => this.next())
 					}
-					this.next()
-					// process.nextTick(() => this.next())
 				}
 			}
 		}
+	}
+}
+
+export class valve<T, S> extends RedioMiddle<T, S> {
+	private _options: RedioOptions | undefined
+	constructor(middler: Valve<T, S>, options?: RedioOptions) {
+		super(middler, options)
+		this._options = options
+	}
+
+	addSrc(prev: RedioPipe<T>): RedioPipe<S> {
+		return this.add(prev as RedioProducer<T>)
+	}
+
+	connectSrc(prev: RedioPipe<T>): RedioPipe<S> {
+		return this.connect(prev as RedioProducer<T>, this._options)
 	}
 }
 
@@ -996,9 +1043,9 @@ export interface RedioStream<T> extends PipeFitting {
 
 class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 	private _sinker: (t: T | RedioEnd) => Promise<void>
-	private _prev: RedioProducer<T>
+	private _prev: RedioProducer<T> | null = null
 	private _ready = true
-	private _debug: boolean
+	private _debug = false
 	private _rejectUnhandled = true
 	private _thatsAllFolks: (() => void) | null = null
 	private _errorFn: ((err: Error) => void) | null = null
@@ -1006,16 +1053,9 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 	private _reject: ((err: any) => void) | null = null
 	private _last: Liquid<T> = nil
 
-	constructor(prev: RedioProducer<T>, sinker: Spout<T>, options?: RedioOptions) {
+	constructor(sinker: Spout<T>, options?: RedioOptions) {
 		super()
-		this._debug =
-			options && Object.prototype.hasOwnProperty.call(options, 'debug')
-				? (options.debug as boolean)
-				: (prev.options.debug as boolean)
-		this._rejectUnhandled =
-			options && Object.prototype.hasOwnProperty.call(options, 'rejectUnhandled')
-				? (options.rejectUnhandled as boolean)
-				: (prev.options.rejectUnhandled as boolean)
+		this.setOptions(options)
 		this._sinker = (t: T | RedioEnd): Promise<void> =>
 			new Promise<void>((resolve, reject) => {
 				this._ready = false
@@ -1049,12 +1089,32 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 					}
 				)
 			})
+	}
+
+	protected setOptions(options?: RedioOptions, prevOptions?: RedioOptions): void {
+		this._debug =
+			options && Object.prototype.hasOwnProperty.call(options, 'debug')
+				? (options.debug as boolean)
+				: (prevOptions?.debug as boolean)
+		this._rejectUnhandled =
+			options && Object.prototype.hasOwnProperty.call(options, 'rejectUnhandled')
+				? (options.rejectUnhandled as boolean)
+				: (prevOptions?.rejectUnhandled as boolean)
+	}
+
+	connect(prev: RedioProducer<T>, options: RedioOptions | undefined): RedioStream<T> {
+		this.setOptions(options, prev.options)
+		prev.connectDst(this)
+
 		this._prev = prev
+		this.next()
+		return this
 	}
 
 	next(): void {
 		if (this._ready) {
-			const v: T | RedioEnd | null = this._prev.pull(this)
+			let v: T | RedioEnd | null = null
+			if (this._prev) v = this._prev.pull(this)
 			if (this._debug) {
 				console.log('Just called pull in spout. Fitting', this.fittingId, 'value', v)
 			}
@@ -1099,6 +1159,18 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 			this._resolve = resolve
 			this._reject = reject
 		})
+	}
+}
+
+export class spout<T> extends RedioSink<T> {
+	private _options: RedioOptions | undefined
+	constructor(sinker: Spout<T>, options?: RedioOptions) {
+		super(sinker, options)
+		this._options = options
+	}
+
+	connectSrc(prev: RedioPipe<T>): RedioStream<T> {
+		return this.connect(prev as RedioProducer<T>, this._options)
 	}
 }
 
