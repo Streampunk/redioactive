@@ -341,7 +341,20 @@ export interface RedioPipe<T> extends PipeFitting {
 	parallel<P>(n: number, options?: RedioOptions): RedioPipe<P>
 	sequence<S>(options?: RedioOptions): RedioPipe<S>
 	series<S>(options?: RedioOptions): RedioPipe<S>
-	zip<Z>(ys: RedioPipe<Z> | Array<Z>, options?: RedioOptions): RedioPipe<[T, Z]>
+	/**
+	 * Takes two streams and returns a stream of corresponding pairs.
+	 * The size of the resulting stream is the smaller of the two source streams.
+	 * @param ys The stream to combine values with TODO: add Array<Z> support
+	 * @param options Optional configuration
+	 */
+	zip<Z>(ys: RedioPipe<Z>, options?: RedioOptions): RedioPipe<[T, Z]> | RedioPipe<T | Z>
+	/**
+	 * Takes a stream and an array of N streams and returns a stream
+	 * of the corresponding (N+1)-tuples.
+	 * @param ys The array of streams to combine values with TODO: add support for a stream of streams
+	 * @param options Optional configuration
+	 */
+	zipEach<Z>(ys: RedioPipe<Z>[], options?: RedioOptions): RedioPipe<[T, ...Z[]]> | RedioPipe<T | Z>
 
 	// Consumption
 	/**
@@ -787,8 +800,19 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	zip<Z>(_ys: RedioPipe<Z> | Array<Z>, _options?: RedioOptions): RedioPipe<[T, Z]> {
-		throw new Error('Not implemented')
+	zip<Z>(ys: RedioPipe<Z>, options?: RedioOptions): RedioPipe<[T, Z]> | RedioPipe<T | Z> {
+		const result = new zipEach<T, Z>(options)
+		result.connectSrc(this, [ys])
+		return result
+	}
+
+	zipEach<Z>(
+		ys: RedioPipe<Z>[],
+		options?: RedioOptions
+	): RedioPipe<[T, ...Z[]]> | RedioPipe<T | Z> {
+		const result = new zipEach<T, Z>(options)
+		result.connectSrc(this, ys)
+		return result
 	}
 
 	each(dotoall?: (t: T) => void | Promise<void>, options?: RedioOptions): RedioStream<T> {
@@ -1006,6 +1030,114 @@ export class valve<T, S> extends RedioMiddle<T, S> {
 	}
 }
 
+export class zipEach<T, Z> extends RedioProducer<T> {
+	private _srcs: RedioProducer<T | Z>[] = []
+	private _srcIndex = 0
+	private _returned = 0
+	private _srcVals: T[] | Z[] = []
+
+	constructor(options?: RedioOptions) {
+		super(options)
+	}
+
+	connectSrc(
+		prevT: RedioPipe<T>,
+		prevZ: RedioPipe<Z>[]
+	): RedioPipe<[T, ...Z[]]> | RedioPipe<T | Z> {
+		this._srcs[0] = prevT as RedioProducer<T>
+		prevZ.forEach((z, i) => (this._srcs[i + 1] = z as RedioProducer<Z>))
+		this._srcs.forEach((p) => p.connectDst(this))
+
+		this.next()
+		return this
+	}
+
+	nextValue(): T | Z | RedioEnd | null {
+		const v = this._srcs[this._srcIndex].pull(this)
+		if (this._debug) {
+			// eslint-disable-next-line prettier/prettier
+			console.log('Just called pull in zip. Fitting', this.fittingId, 'index', this._srcIndex, 'value', v)
+		}
+		if (v !== null && !isEnd(v)) {
+			this._srcVals[this._srcIndex] = v
+			this._returned++
+			this._srcIndex = (this._srcIndex + 1) % this._srcs.length
+		}
+		return v
+	}
+
+	async next(): Promise<void> {
+		if (this._srcs.length) {
+			const val = this.nextValue()
+			if (isEnd(val)) this.push(end)
+			else if (this._returned === this._srcs.length) {
+				if (this._oneToMany) this._srcVals.forEach((x: T | Z) => this.push(x))
+				else this.push(this._srcVals)
+
+				this._returned = 0
+				this._srcVals = []
+
+				if (this._debug) {
+					console.log('About to call next in', this.fittingId)
+				}
+				this.next()
+			}
+		}
+	}
+}
+
+export class zipAll<T> extends RedioProducer<T> {
+	private _srcs: RedioProducer<T>[] = []
+	private _srcIndex = 0
+	private _returned = 0
+	private _srcVals: T[] = []
+
+	constructor(options?: RedioOptions) {
+		super(options)
+	}
+
+	connectSrc(prev: RedioPipe<T>[]): RedioPipe<[T]> | RedioPipe<T> {
+		this._srcs = prev as RedioProducer<T>[]
+		this._srcs.forEach((p) => p.connectDst(this))
+
+		this.next()
+		return this
+	}
+
+	nextValue(): T | RedioEnd | null {
+		const v = this._srcs[this._srcIndex].pull(this)
+		if (this._debug) {
+			// eslint-disable-next-line prettier/prettier
+			console.log('Just called pull in zip. Fitting', this.fittingId, 'index', this._srcIndex, 'value', v)
+		}
+		if (v !== null && !isEnd(v)) {
+			this._srcVals[this._srcIndex] = v
+			this._returned++
+			this._srcIndex = (this._srcIndex + 1) % this._srcs.length
+		}
+		return v
+	}
+
+	async next(): Promise<void> {
+		if (this._srcs.length) {
+			const val = this.nextValue()
+			if (isEnd(val)) this.push(end)
+			else if (this._returned === this._srcs.length) {
+				if (this._oneToMany) this._srcVals.forEach((x) => this.push(x))
+				else this.push(this._srcVals)
+
+				this._returned = 0
+				this._srcVals = []
+
+				if (this._debug) {
+					console.log('About to call next in', this.fittingId)
+				}
+				this.next()
+			}
+		}
+	}
+}
+
 /**
  *  The end of a pipeline of a reactive stream where the liquid flows out.
  *  Methods `done`, `catch` and `toPromise` decide what happens at the end
@@ -1102,7 +1234,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 				: (prevOptions?.rejectUnhandled as boolean)
 	}
 
-	connect(prev: RedioProducer<T>, options: RedioOptions | undefined): RedioStream<T> {
+	connect(prev: RedioProducer<T>, options?: RedioOptions): RedioStream<T> {
 		this.setOptions(options, prev.options)
 		prev.connectDst(this)
 
