@@ -332,6 +332,14 @@ export interface RedioPipe<T> extends PipeFitting {
 	parallel<P> (n: number, options?: RedioOptions): RedioPipe<P>
 	sequence<S> (options?: RedioOptions): RedioPipe<S>
 	series<S> (options?: RedioOptions): RedioPipe<S>
+	/**
+	 *  Takes two streams and returns a stream of corresponding pairs. The size of the
+	 *  resulting stream is that of the smallest source.
+	 *  @param ys      Second stream to use to pair up values with this one.
+	 *  @param options Optional configuration.
+	 *  @typeparam Z Type of the values in the second stream
+	 *  @returns Stream containing matches pairs of values fom the source streams.
+	 */
 	zip<Z> (ys: RedioPipe<Z> | Array<Z>, options?: RedioOptions): RedioPipe<[T, Z]>
 
 	// Consumption
@@ -739,8 +747,51 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	zip<Z> (_ys: RedioPipe<Z> | Array<Z>, _options?: RedioOptions): RedioPipe<[T, Z]> {
-		throw new Error('Not implemented')
+	zip<Z> (ys: RedioPipe<Z> | Array<Z>, _options?: RedioOptions): RedioPipe<[T, Z]> {
+		let yState: Array<{ value: Z, resolver: () => void }>
+		let tState: Array<{ value: T, resolver: (x: LotsOfLiquid<[T, Z]>) => void }>
+		let yError: Error | null = null
+		let ended = false
+		let sentEnd = false
+		function checkBoth () {
+			if (yError && tState.length > 0) {
+				tState[0].resolver(yError)
+				yError = null
+				tState[0].resolver = () => { /* void */ }
+			}
+			while (yState.length > 0 && tState.length > 0) {
+				let [ tv, yv ] = [ tState.shift(), yState.shift() ]
+				yv!.resolver()
+				tv!.resolver([tv!.value, yv!.value ])
+			}
+		}
+		if (Array.isArray(ys)) {
+			yState = ys.map((y: Z) => ({ value: y, resolver: () => { /* void */ } }))
+		} else {
+			ys.each((y: Z) => new Promise((resolve) => {
+				yState.push({ value: y, resolver: resolve })
+				checkBoth()
+			})).done(() => {
+				ended = true
+				checkBoth()
+			}).catch(e => {
+				yError = e
+				checkBoth()
+			})
+		}
+		return this.valve(async (t: Liquid<T>): Promise<LotsOfLiquid<[T, Z]>> => {
+			if (isEnd(t)) {
+				ended = true
+				checkBoth()
+			}
+			if (isAnError(t)) {
+				return t
+			}
+			return new Promise<LotsOfLiquid<[T, Z]>>((resolve) => {
+				tState.push({ value: t as T, resolver: resolve })
+				checkBoth()
+			})
+		})
 	}
 
 	each (dotoall?: (t: T) => void | Promise<void>, options?: RedioOptions): RedioStream<T> {
