@@ -15,13 +15,16 @@ import { EventEmitter } from 'events'
 import { URL } from 'url'
 const { isPromise } = types
 
+interface NilEnd { }
+
 /** Type of a value sent down a stream to indicate that it has ended. No values
  *  should follow.
  */
 // eslint-disable-next-line @typescript-eslint/ban-types
-export type RedioEnd = {}
+export interface RedioEnd extends NilEnd { end: true }
 /** Constant value indicating the [[RedioEnd|end]] of a stream. */
-export const end: RedioEnd = {}
+export const end: RedioEnd = { end: true }
+
 /**
  *  Test that a value is the end of a stream.
  *  @param t Value to test.
@@ -40,9 +43,9 @@ export function isEnd(t: any): t is RedioEnd {
  *  produce.
  */
 // eslint-disable-next-line @typescript-eslint/ban-types
-export type RedioNil = {}
+export interface RedioNil extends NilEnd { nil: true }
 /** Constant representing a [[RedioNil|nil]] value. */
-export const nil: RedioNil = {}
+export const nil: RedioNil = { nil: true }
 /**
  *  Test a value to see if it is an [[RedioNil|empty value]].
  *  @param t Value to test.
