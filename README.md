@@ -89,8 +89,9 @@ Processing placed along a stream may transforms a stream by consuming values of 
 
 The purpose of readioactive is to ensure that the flow rate is balanced between the producers and the consumers:
 
-* limiting the speed of a busy producer to meet the flow rate at the consumer using _back pressure_ ...
-* while ensuring a consumer is not left waiting for values to flow along the entire stream when it is next hungry for more
+* limiting the speed of a busy producer to meet the flow rate at the consumer using [_back pressure_](https://www.reactivemanifesto.org/glossary#Back-Pressure) ...
+* while using buffers to ensure that
+ a consumer is not left waiting for values to flow along the entire stream when it is next hungry for more
 
 #### Pipes and fittings
 
@@ -98,38 +99,83 @@ Streams flow along _pipes_ (a `RedioPipe`) and a stream (`RedioStream`) can only
 
 * _funnels_ at the start of pipes, receiving values from sources such as Node streams, arrays, generator functions, event emitters etc.
 * _valves_ connect two pipe sections together, with options to split or join pipes, store values in reservoirs and change flow rate and/or stream type
-* _spouts_ are the end of the stream, where it leaves redioative and enters another realm, such as resolving promises, writing to Node streams, omitting events etc..
+* _spouts_ are the end of the stream, where it leaves redioative and enters another realm, such as resolving promises, writing to Node streams, emitting events etc..
 
 Fittiings are the building blocks for creating streams with redioactive and are expressed as functions that return a promise to produce zero, one or more values of type `T`. Specifically:
 
-* A `Funnel<T>` fitting is a [_thunk_](https://en.wikipedia.org/wiki/Thunk) function that generates a new value for the stream every time it is called. It is **vital** that this is a function that will create a new value or promise every time it is called. If a promise, the time taken to resolve will regulate the speed that the stream is produced and the thunk is called again.
+* A `Funnel<T>` fitting is a [_thunk_](https://en.wikipedia.org/wiki/Thunk) function that generates a new value for the stream every time it is called. It is **vital** that this is a function that will create a new value or promise every time it is called. If a promise, the time taken to resolve will regulate the speed that the stream is produced and the thunk is called again. Built-in funnels are functions exported by redioactive as `default`.
 * A `Valve<S, T>` fitting receives a value of type `S` from the stream and tranforms it into a stream of the same or a different type `T`, with the ability to regulate the stream by returning a promise. Many-to-one valve functions may be created within a [closure](https://en.wikipedia.org/wiki/Closure_(computer_programming)) to allow a side-effect reservior of state to be built up.
 * A `Spout<T>` receives values at the end of the stream and takes some side effect action. If that action is asynchronous, the spout returns a promise and the time taken to resolve regulates the flow upstream.
 
 #### Create with types
 
-Be creative with types! All of the basic and advanced type structures of Typescript are available to construct the values of a stream of type `T`. This includes:
+Be creative with types! All of the [basic](https://www.typescriptlang.org/docs/handbook/basic-types.html) and [advanced](https://www.typescriptlang.org/docs/handbook/advanced-types.html) type structures of Typescript are available to construct the values of a stream of type `T`. This includes:
 
 * all the primitive types
-* object, Object, {} and any
-* arrays, functions, classes with inheritence
-* intersection and union types
-* interfaces and index types
-* type aliases
+* `object`, `Object`, `{}` and `any`
+* arrays, functions 
+* classes and interfaces with inheritence (eg. `interface Square extends Shape { }`)
+* intersection and union types (eg. `Apple | Pear | Orange`)
+* generics (e.g. `Bucket<Things>`)
+* type aliases (e.g. `type Fruit = Apple | Tomato`)
+* Node.js `Buffer`
 
-The intention is to bring the benefits of Typescript strong typing to reactive streams programming with Javascript
-
+Redioactive brings the benefits of Typescript's strong typing to reactive streams programming with Javascript. All kinds of values can flow down a stream and designing the type system will be the key to developing stream-based applications.  
 
 ### Features
 
-### Observe and join
+#### Promises just work
 
-### HTTP/S clustering
+Expressing asynchronous work as promises is becoming the defacto approach for Javascript and Typescript developers, replacing callbacks. Express asynchronous processing for each stream element 
 
+#### Fork and zip
+
+Streams can be split into two or more branches using `fork` and `observe` fittings. Forked streams share back pressure between each branch so that the slowest stream regulates the flow. For observed streams, one mainline branch is used to regulate flow and the observers must either keep up or the pipe will leak values!
+
+Streams can be joined together using the `zip` and `zipEach` fittings. In this case, any upstream back pressure regulates the flow of all incoming streams.
+
+#### HTTP/S stream clustering
+
+Streams can be distributed for processing on more than one computer using HTTP or HTTPS (HTTP/S). One of the benefits of distributed reactive stream processing is that both back pressure and network delay regulate the overall flow of the stream. This is inherent to the network protocols and does not require the use of, for example, shared clocks between systems, thus enabling local stream work to be moved remotely. The processing will self-optimize to suit the environment, minimising end-to-end latency while adapting to bandwidth conditions.
+
+There are some limitations for this implemention though:
+
+* Values must be one of:
+  * An object that can be serialized to JSON (ie. no circular references)
+  * A single `Buffer` or buffer-like object
+  * A flat JSON object (properties become HTTP headers) describing a single `Buffer` property
+* It should be possible to uniquely identify both the stream and each value of the stream and its _next_ value.
+* Some knowledge of the cadence of the stream - the duration in time between the production of each value - will help to manage the performance.
+
+If the stream is suitable for transport over HTTP/S, create an HTTP spout with the RedioPipe `http` method. Receive the HTTP/S stream with an _HTTP funnel_.
+
+HTTP/S streams have a number of configurations:
+
+* PUSH or PULL: A stream can be pushed from the source to destination using HTTP/S POST requests or PULLed from a source to a target via HTTP/S GET requests
+* Sequential or parallel: Maintaining stream order, multiple parrallel connections allow a stream to be pushed or pulled on one or more sequential connections
+* Whole or chunked: Binary payloads can be split into separate pieces, transported and then re-asembled - in combination with paralle this may lower latency
+
+See the documentation on `HTTPOptions` for more information.
+
+### Higher-order functions
 
 ### Usage
 
-This is a self-documenting API. Fire up your IDE and hover over the method descriptions to find out more.
+This is a self-documenting API. Fire up your IDE and hover over the method descriptions to find out more. This section provides some general pointers.
+
+#### Creating a stream
+
+#### Ending a stream
+
+#### One-to-many
+
+#### Many-to-one and nil
+
+#### Error handling
+
+#### Debugging
+
+
 
 ### License
 
