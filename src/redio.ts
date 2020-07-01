@@ -10,7 +10,7 @@
  *  inspired by Highland.js and adds support for configurable buffers at each stage.
  */
 
-import { types } from 'util'
+import { types, isError } from 'util'
 import { EventEmitter } from 'events'
 import { URL } from 'url'
 const { isPromise } = types
@@ -19,9 +19,9 @@ const { isPromise } = types
  *  should follow.
  */
 // eslint-disable-next-line @typescript-eslint/ban-types
-export type RedioEnd = {}
+export type RedioEnd = { end: true }
 /** Constant value indicating the [[RedioEnd|end]] of a stream. */
-export const end: RedioEnd = {}
+export const end: RedioEnd = { end: true }
 /**
  *  Test that a value is the end of a stream.
  *  @param t Value to test.
@@ -40,9 +40,9 @@ export function isEnd(t: any): t is RedioEnd {
  *  produce.
  */
 // eslint-disable-next-line @typescript-eslint/ban-types
-export type RedioNil = {}
+export type RedioNil = { nil: true }
 /** Constant representing a [[RedioNil|nil]] value. */
-export const nil: RedioNil = {}
+export const nil: RedioNil = { nil: true }
 /**
  *  Test a value to see if it is an [[RedioNil|empty value]].
  *  @param t Value to test.
@@ -72,6 +72,15 @@ export type Liquid<T> = T | RedioEnd | RedioNil | Error
  *  function, to represent a sequence of values to be flattenned into the stream.
  */
 export type LotsOfLiquid<T> = Liquid<T> | Array<Liquid<T>>
+
+/**
+ * Test a value to see if it is an stream value, not `end`, `nil` or an error.
+ * @param t Value to test
+ * @return True is the value is stream value.
+ */
+export function isValue<T>(t: Liquid<T>): t is T {
+	return t !== nil && t !== end && !types.isNativeError(t)
+}
 
 /**
  *  A function that can be used to produce a stream of items that is
@@ -104,9 +113,12 @@ export interface Valve<S, T> {
 	 *  @param s Single item to consume.
 	 *  @return Promise to produce item(s) or the direct production of item(s).
 	 */
-	(s: Liquid<S>): Promise<LotsOfLiquid<T>> | LotsOfLiquid<T>
+	(s: S | RedioEnd): Promise<LotsOfLiquid<T>> | LotsOfLiquid<T>
 }
 
+interface FullValve<S, T> extends Valve<S, T> {
+	(s: Liquid<S>): Promise<LotsOfLiquid<T>> | LotsOfLiquid<T>
+}
 /**
  *  Function at the end of a pipe for handling the output of a stream.
  *  @typeparam T Type of items at the end of the stream.
@@ -117,6 +129,10 @@ export interface Spout<T> {
 	 *  a side effect or operation that acts on the value.
 	 *  @param t Item to consume.
 	 */
+	(t: T | RedioEnd): Promise<void> | void
+}
+
+interface FullSpout<T> extends Spout<T> {
 	(t: Liquid<T>): Promise<void> | void
 }
 
@@ -384,7 +400,7 @@ abstract class RedioFitting implements PipeFitting {
 abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	protected _followers: Array<RedioProducer<any> | RedioSink<T>> = []
 	protected _pullCheck: Set<number> = new Set<number>()
-	protected _buffer: (T | RedioEnd)[] = []
+	protected _buffer: Liquid<T>[] = []
 	protected _running = true
 	protected _bufferSizeMax = 10
 	protected _drainFactor = 0.7
@@ -422,7 +438,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}
 	}
 
-	protected push(x: T | RedioEnd): void {
+	protected push(x: Liquid<T>): void {
 		this._buffer.push(x)
 		if (this._debug) {
 			console.log(
@@ -435,7 +451,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}
 	}
 
-	pull(puller: PipeFitting): T | RedioEnd | null {
+	pull(puller: PipeFitting): Liquid<T> {
 		const provideVal = !this._pullCheck.has(puller.fittingId)
 		if (!provideVal) {
 			if (this._debug) {
@@ -451,7 +467,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 				`Received pull at fitting source ${this.fittingId} to destination ${puller.fittingId} with count ${this._pullCheck.size} / ${this._followers.length}`
 			)
 		}
-		let val: T | RedioEnd | undefined
+		let val: Liquid<T> | undefined
 		if (this._pullCheck.size === this._followers.length) {
 			val = this._buffer.shift()
 			this._pullCheck.clear()
@@ -469,7 +485,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		} else {
 			val = provideVal ? this._buffer[0] : undefined
 		}
-		return val !== undefined ? val : null
+		return val !== undefined ? val : nil
 	}
 
 	next(): Promise<void> {
@@ -481,7 +497,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 			throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.')
 		}
 		// eslint-disable-next-line @typescript-eslint/no-use-before-define
-		this._followers = [new RedioMiddle<T, S>(this, valve, options)]
+		this._followers = [new RedioMiddle<T, S>(this, valve as FullValve<T, S>, options)]
 		this._pullCheck.clear()
 		return this._followers[0] as RedioPipe<S>
 	}
@@ -491,7 +507,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 			throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.')
 		}
 		// eslint-disable-next-line @typescript-eslint/no-use-before-define
-		this._followers = [new RedioSink<T>(this, spout, options)]
+		this._followers = [new RedioSink<T>(this, spout as FullSpout<T>, options)]
 		this._pullCheck.clear()
 		return this._followers[0] as RedioStream<T>
 	}
@@ -535,7 +551,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	doto(f: (t: T) => Promise<void> | void, _options?: RedioOptions): RedioPipe<T> {
 		return this.valve(
 			(t: Liquid<T>): Liquid<T> => {
-				if (!isEnd(t)) {
+				if (isValue(t)) {
 					f(t)
 				}
 				return t
@@ -575,7 +591,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 
 	filter(filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T> {
 		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
-			if (!isEnd(t)) {
+			if (isValue(t)) {
 				return (await filter(t)) ? t : nil
 			}
 			return end
@@ -617,7 +633,9 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 
 	map<M>(mapper: (t: T) => M | Promise<M>, options?: RedioOptions): RedioPipe<M> {
 		return this.valve(async (t: Liquid<T>): Promise<Liquid<M>> => {
-			if (!isEnd(t)) return mapper(t)
+			if (isValue(t)) {
+				return mapper(t)
+			}
 			return end
 		}, options)
 	}
@@ -723,9 +741,9 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	flatMap<M>(mapper: (t: Liquid<T>) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M> {
+	flatMap<M>(mapper: (t: T | RedioEnd) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M> {
 		const localOptions = Object.assign(options, { oneToMany: true } as RedioOptions)
-		return this.valve(async (t: Liquid<T>): Promise<LotsOfLiquid<M>> => {
+		return this.valve(async (t: T | RedioEnd): Promise<LotsOfLiquid<M>> => {
 			if (!isEnd(t)) {
 				const values = await mapper(t).toArray()
 				if (Array.length === 0) return nil
@@ -742,7 +760,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 
 	fork(options?: RedioOptions): RedioPipe<T> {
 		// eslint-disable-next-line @typescript-eslint/no-use-before-define
-		const identity = new RedioMiddle<T, T>(this, (i) => i, options)
+		const identity = new RedioMiddle<T, T>(this, (i: any) => i, options)
 		this._followers.push(identity)
 		return identity
 	}
@@ -784,7 +802,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 				/* void */
 			}
 		}
-		return this.spout(async (tt: T | RedioEnd) => {
+		return this.spout(async (tt: Liquid<T>) => {
 			if (isEnd(tt)) {
 				if (options && options.debug) {
 					console.log('Each: THE END')
@@ -792,7 +810,9 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 				return
 			}
 			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-			await dotoall!(tt)
+			if (isValue(tt)) {
+				await dotoall!(tt)
+			}
 		}, options)
 	}
 
@@ -803,11 +823,11 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	async toArray(options?: RedioOptions): Promise<Array<T>> {
 		const result: Array<T> = []
 		const promisedArray: Promise<Array<T>> = new Promise((resolve, _reject) => {
-			this.spout((tt: T | RedioEnd) => {
+			this.spout((tt: Liquid<T>) => {
 				if (isEnd(tt)) {
 					resolve(result)
 				} else {
-					result.push(tt)
+					isValue(tt) && result.push(tt)
 				}
 			}, options)
 		})
@@ -852,8 +872,13 @@ class RedioStart<T> extends RedioProducer<T> {
 		if (this._running) {
 			try {
 				const result = await this._maker()
-				if (this._oneToMany && Array.isArray(result)) {
-					result.forEach((x) => this.push(x))
+				if (Array.isArray(result)) {
+					if (this._oneToMany) {
+						result.forEach((x) => isValue(x) && this.push(x))
+					} else {
+						// Odd situation where T is an Array<X>
+						this.push(result as unknown as T) 
+					}
 				} else if (isNil(result)) {
 					// Don't push
 				} else {
@@ -882,14 +907,14 @@ export function isAPromise<T>(o: any): o is Promise<T> {
 }
 
 class RedioMiddle<S, T> extends RedioProducer<T> {
-	private _middler: Valve<S, T>
+	private _middler: FullValve<S, T>
 	private _ready = true
 	private _prev: RedioProducer<S>
 
-	constructor(prev: RedioProducer<S>, middler: Valve<S, T>, options?: RedioOptions) {
+	constructor(prev: RedioProducer<S>, middler: FullValve<S, T>, options?: RedioOptions) {
 		super(Object.assign(prev.options, { processError: false }, options))
-		this._middler = (s: S | RedioEnd): Promise<T | RedioEnd> =>
-			new Promise<T | RedioEnd>((resolve, reject) => {
+		this._middler = (s: Liquid<S>): Promise<Liquid<T> | LotsOfLiquid<T>> =>
+			new Promise<LotsOfLiquid<T>>((resolve, reject) => {
 				this._ready = false
 				let callIt = middler(s)
 				if (isAnError(callIt)) {
@@ -897,7 +922,7 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 				}
 				const promisy = isAPromise(callIt) ? callIt : Promise.resolve(callIt)
 				promisy.then(
-					(t: T | RedioEnd) => {
+					(t: LotsOfLiquid<T>) => {
 						this._ready = true
 						resolve(t)
 						if (this._debug) {
@@ -919,18 +944,23 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 
 	async next(): Promise<void> {
 		if (this._running && this._ready) {
-			const v: S | RedioEnd | null = this._prev.pull(this)
+			const v: Liquid<S> = this._prev.pull(this)
 			if (this._debug) {
 				console.log('Just called pull in valve. Fitting', this.fittingId, 'value', v)
 			}
 			if (isAnError(v) && !this._processError) {
 				this.push(v)
 				process.nextTick(() => this.next())
-			} else if (v !== null) {
+			} else if (!isNil(v)) {
 				try {
 					const result = await this._middler(v)
-					if (this._oneToMany && Array.isArray(result)) {
-						result.forEach((x) => this.push(x))
+					if (Array.isArray(result)) {
+						if (this._oneToMany) {
+							result.forEach((x) => isValue(x) && this.push(x))
+						} else {
+							// Odd situation where T is an Array<X>
+							this.push(result as unknown as T)
+						}
 						if (isEnd(v) && result.length > 0 && !isEnd(result[result.length - 1])) {
 							this.push(end)
 						}
@@ -995,7 +1025,7 @@ export interface RedioStream<T> extends PipeFitting {
 }
 
 class RedioSink<T> extends RedioFitting implements RedioStream<T> {
-	private _sinker: (t: T | RedioEnd) => Promise<void>
+	private _sinker: FullSpout<T>
 	private _prev: RedioProducer<T>
 	private _ready = true
 	private _debug: boolean
@@ -1006,7 +1036,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 	private _reject: ((err: any) => void) | null = null
 	private _last: Liquid<T> = nil
 
-	constructor(prev: RedioProducer<T>, sinker: Spout<T>, options?: RedioOptions) {
+	constructor(prev: RedioProducer<T>, sinker: Spout<T> & FullSpout<T>, options?: RedioOptions) {
 		super()
 		this._debug =
 			options && Object.prototype.hasOwnProperty.call(options, 'debug')
@@ -1016,7 +1046,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 			options && Object.prototype.hasOwnProperty.call(options, 'rejectUnhandled')
 				? (options.rejectUnhandled as boolean)
 				: (prev.options.rejectUnhandled as boolean)
-		this._sinker = (t: T | RedioEnd): Promise<void> =>
+		this._sinker = (t: Liquid<T>): Promise<void> =>
 			new Promise<void>((resolve, reject) => {
 				this._ready = false
 				let callIt: void | Promise<void>
@@ -1052,14 +1082,16 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 		this._prev = prev
 	}
 
-	next(): void {
+	async next(): Promise<void> {
 		if (this._ready) {
-			const v: T | RedioEnd | null = this._prev.pull(this)
+			const v: Liquid<T> = this._prev.pull(this)
 			if (this._debug) {
 				console.log('Just called pull in spout. Fitting', this.fittingId, 'value', v)
 			}
-			if (v !== null) {
-				this._sinker(v).catch((err) => {
+			if (!isNil(v)) {
+				try {
+					await this._sinker(v)
+				} catch(err) {
 					let handled = false
 					if (this._errorFn) {
 						handled = true
@@ -1079,7 +1111,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 							throw err
 						}
 					}
-				})
+				}
 			}
 		}
 	}
