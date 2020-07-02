@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
 /**
@@ -18,7 +17,6 @@ const { isPromise } = types
 /** Type of a value sent down a stream to indicate that it has ended. No values
  *  should follow.
  */
-// eslint-disable-next-line @typescript-eslint/ban-types
 export type RedioEnd = { end: true }
 /** Constant value indicating the [[RedioEnd|end]] of a stream. */
 export const end: RedioEnd = { end: true }
@@ -27,8 +25,7 @@ export const end: RedioEnd = { end: true }
  *  @param t Value to test.
  *  @return True is the value is the end of a stream.
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export function isEnd(t: any): t is RedioEnd {
+export function isEnd(t: unknown): t is RedioEnd {
 	return t === end
 }
 
@@ -39,7 +36,6 @@ export function isEnd(t: any): t is RedioEnd {
  *  Nil values can be used in processing stages that consume more values than they
  *  produce.
  */
-// eslint-disable-next-line @typescript-eslint/ban-types
 export type RedioNil = { nil: true }
 /** Constant representing a [[RedioNil|nil]] value. */
 export const nil: RedioNil = { nil: true }
@@ -48,8 +44,7 @@ export const nil: RedioNil = { nil: true }
  *  @param t Value to test.
  *  @return True if the value is the _nil_ empty value.
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export function isNil(t: any): t is RedioNil {
+export function isNil(t: unknown): t is RedioNil {
 	return t === nil
 }
 
@@ -58,8 +53,7 @@ export function isNil(t: any): t is RedioNil {
  *  @param t Value to test.
  *  @return True if the value is an error.
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export function isAnError(t: any): t is Error {
+export function isAnError(t: unknown): t is Error {
 	return types.isNativeError(t)
 }
 
@@ -117,14 +111,14 @@ export interface Valve<S, T> {
 }
 
 /**
- *  A funciton that can be used to process an incoming stream of liquid or errors 
+ *  A funciton that can be used to process an incoming stream of liquid or errors
  *  and create a possibly different kind of stream of liquid.
- *  This is an advanced feature. In normal use, allow redioactive to handle and 
+ *  This is an advanced feature. In normal use, allow redioactive to handle and
  *  propogate errors.
  *  @typeparam S Source type for the itemsconsumed.
  *  @typeparam T Target type for items produced.
  */
-export interface ErrorValve<S, T> {	
+export interface ErrorValve<S, T> {
 	/**
 	 *  A function that consumes a single item or error from an incoming stream and produces
 	 *  values for an outgoing stream. The function an return [[nil]] if the
@@ -152,17 +146,17 @@ export interface Spout<T> {
 
 /**
  *  Function at the end of a pipe for handling the output and errors of a stream.
- *  This is an advanced feature. In normal use, allow redioactive to handle and 
+ *  This is an advanced feature. In normal use, allow redioactive to handle and
  *  propogate errors.
  *  @typeparam T Type of items at the end of the stream.
  */
 export interface ErrorSpout<T> {
 	/**
-	 *  A function that consumes a single item or an error at the end of a stream, 
+	 *  A function that consumes a single item or an error at the end of a stream,
 	 *  executing a side effect or operation that acts on the value. Also set
 	 *  [[RedioOptions.processError]].
-	 *  This is an advanced feature. In normal use, allow redioactive to handle and 
- 	 *  propogate errors.
+	 *  This is an advanced feature. In normal use, allow redioactive to handle and
+	 *  propogate errors.
 	 *  @param t Item to consume.
 	 */
 	(t: Liquid<T>): Promise<void> | void
@@ -241,26 +235,25 @@ interface PipeFitting {
 /**
  *  Configuration options for an endpoint that transports a stream over the
  *  the HTTP protocol.
- * 
- *  HTTP streams consist of a RESTful resource at a given path, the _stream root path_. 
- *  This stream has sub-resources that include an optoinal _stream manifest_ and a sequence of 
- *  values, where each value in the sequence has an _sequence identifier_ and a reference 
- *  to the _next_ value in the sequence, which may be computed from a _delta increment). 
- *  Sequence identifiers can be names, timestamps, counters etc.. These options set - or 
- *  reference the properties of a stream type `T` - to be used to configure the 
+ *
+ *  HTTP streams consist of a RESTful resource at a given path, the _stream root path_.
+ *  This stream has sub-resources that include an optoinal _stream manifest_ and a sequence of
+ *  values, where each value in the sequence has an _sequence identifier_ and a reference
+ *  to the _next_ value in the sequence, which may be computed from a _delta increment).
+ *  Sequence identifiers can be names, timestamps, counters etc.. These options set - or
+ *  reference the properties of a stream type `T` - to be used to configure the
  *  stream.
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface HTTPOptions extends RedioOptions {
 	/** HTTP port to use for pull or push. Default is 8765. Set to `-1` to disable. */
 	httpPort?: number
 	/** HTTPS port to use for pull or push. Default is 8766. Set to `-1` to disable.  */
 	httpsPort?: number
-	/** Append the first value of the named property of type `T` to complete the stream 
-	 *  root path, e.g. if the URI contains `/fred/ginger` and the property of `T` called 
-	 *  _extraStreamRoot_ has value `streamId` with value `audio/channel3`, the full stream 
+	/** Append the first value of the named property of type `T` to complete the stream
+	 *  root path, e.g. if the URI contains `/fred/ginger` and the property of `T` called
+	 *  _extraStreamRoot_ has value `streamId` with value `audio/channel3`, the full stream
 	 *  root is `/fred/ginger/audio/channel3/`. If undefined, then `/fred/ginger/`.
-	*/
+	 */
 	extraStreamRoot?: string
 	/** Use the named property of `T` as the identifier for each value flowing down the
 	 *  stream, for example a timestamp or timestamp generator funciton. If omitted,
@@ -279,22 +272,22 @@ export interface HTTPOptions extends RedioOptions {
 	 *  or numerical 10% window around the _current + delta_ value. Default is exact matching.
 	 */
 	fuzzy?: boolean
-	/** Provide the optional manifest that is a description of the entire stream. The 
+	/** Provide the optional manifest that is a description of the entire stream. The
 	 *  manifest will be available from every received value. If set to a string, the
-	 *  manifest is taken from the first value of property `T` of that name found 
+	 *  manifest is taken from the first value of property `T` of that name found
 	 *  in the stream. The default is not to set a manifest.
 	 */
-	manifest?: string | any
+	manifest?: string | Record<string, unknown>
 	/** Set if a property of a value of `T` defines the binary payload of an HTTP stream.
 	 *  If defined, any other properties of the value are carried in the HTTP header.
-	*/
+	 */
 	blob?: string
 	/** Allow multiple clients to pull from the server. Back pressure will be based on
 	 *  the highest value of sequence identifier. Default is one-to-one.
 	 */
 	allowMultiple?: boolean
 	/** How many parallel streams should be used to send the stream. This allows a number
-	 *  of values to be in flight at one time, although the stream will always be 
+	 *  of values to be in flight at one time, although the stream will always be
 	 *  sent and received in order. When undefined, the default value is 1.
 	 */
 	parallel?: number
@@ -371,12 +364,11 @@ export interface RedioPipe<T> extends PipeFitting {
 	 */
 	filter(filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
 	find(filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
-	// eslint-disable-next-line @typescript-eslint/ban-types
-	findWhere(props: object, options?: RedioOptions): RedioPipe<T>
-	group(f: string | ((t: T) => any), options?: RedioOptions): RedioPipe<T>
+	findWhere(props: Record<string, unknown>, options?: RedioOptions): RedioPipe<T>
+	group(f: string | ((t: T) => unknown), options?: RedioOptions): RedioPipe<T>
 	head(options?: RedioOptions): RedioPipe<T>
 	intersperse<I>(sep: Promise<I> | I, options?: RedioOptions): RedioPipe<T | I>
-	invoke<R>(method: string, args: Array<any>, options?: RedioOptions): RedioPipe<R>
+	invoke<R>(method: string, args: Array<unknown>, options?: RedioOptions): RedioPipe<R>
 	last(options?: RedioOptions): RedioPipe<T>
 	latest(options?: RedioOptions): RedioPipe<T>
 	/**
@@ -388,7 +380,7 @@ export interface RedioPipe<T> extends PipeFitting {
 	 */
 	map<M>(mapper: (t: T) => M | Promise<M>, options?: RedioOptions): RedioPipe<M>
 	pick(properties: Array<string>, options?: RedioOptions): RedioPipe<T>
-	pickBy(f: (key: string, value: any) => boolean, options?: RedioOptions): RedioPipe<T>
+	pickBy(f: (key: string, value: unknown) => boolean, options?: RedioOptions): RedioPipe<T>
 	pluck(prop: string, options?: RedioOptions): RedioPipe<T>
 	ratelimit(num: number, ms: number, options?: RedioOptions): RedioPipe<T>
 	reduce<R>(iterator: (a: R, b: T) => R, init: R, options?: RedioOptions): RedioPipe<T>
@@ -413,8 +405,7 @@ export interface RedioPipe<T> extends PipeFitting {
 	throttle(ms: number, options?: RedioOptions): RedioPipe<T>
 	uniq(options?: RedioOptions): RedioPipe<T>
 	uniqBy(f: (a: T, b: T) => boolean, options?: RedioOptions): RedioPipe<T>
-	// eslint-disable-next-line @typescript-eslint/ban-types
-	where(props: object, options?: RedioOptions): RedioPipe<T> // Filter on object properties
+	where(props: Record<string, unknown>, options?: RedioOptions): RedioPipe<T> // Filter on object properties
 
 	// Higher order streams
 	concat(ys: RedioPipe<T> | Array<T>, options?: RedioOptions): RedioPipe<T>
@@ -477,8 +468,11 @@ export interface RedioPipe<T> extends PipeFitting {
 	 *  @returns The last fitting of a pipeline that consumes all the values.
 	 */
 	each(dotoall?: (t: T) => void | Promise<void>, options?: RedioOptions): RedioStream<T>
-	// eslint-disable-next-line @typescript-eslint/ban-types
-	pipe(dest: WritableStream<T>, streamOptions: object, options?: RedioOptions): RedioStream<T>
+	pipe(
+		dest: WritableStream<T>,
+		streamOptions: Record<string, unknown>,
+		options?: RedioOptions
+	): RedioStream<T>
 	/**
 	 *  Consume the stream by writing each value into an array, the resolving
 	 *  to that array.
@@ -487,25 +481,24 @@ export interface RedioPipe<T> extends PipeFitting {
 	 */
 	toArray(options?: RedioOptions): Promise<Array<T>>
 	toCallback(f: (err: Error, value: T) => void): RedioStream<T> // Just one value
-	// eslint-disable-next-line @typescript-eslint/ban-types
-	toNodeStream(streamOptions: object, options?: RedioOptions): ReadableStream
+	toNodeStream(streamOptions: Record<string, unknown>, options?: RedioOptions): ReadableStream
 	/**
 	 * Connect a stream to another processing node via HTTP/S. A matching funnel can receive
-	 * the stream. HTTP/S streams must have a stream identifier root path, a unique identifier 
-	 * for each element in the sequence (i.e. a counter or timestamp) and a means to identify 
-	 * the next element (e.g. expected increment).The options provide a way to map the 
-	 * sequence of elements to HTTP headers and payloads. 
+	 * the stream. HTTP/S streams must have a stream identifier root path, a unique identifier
+	 * for each element in the sequence (i.e. a counter or timestamp) and a means to identify
+	 * the next element (e.g. expected increment).The options provide a way to map the
+	 * sequence of elements to HTTP headers and payloads.
 	 * Note that not all kinds of payloads can be transported via HTTP, one of:
 	 * * serializable to JSON object
 	 * * a binary blob (Buffer or equivalent)
-	 * * a simple JSON payload that can be serialized to HTTP headers and a nominated 
+	 * * a simple JSON payload that can be serialized to HTTP headers and a nominated
 	 *   binary blob property
 	 * @param uri Depending on the kind of stream:
-	 *            * for PUSH streams, a URL with protocol, hostname, port and stream 
+	 *            * for PUSH streams, a URL with protocol, hostname, port and stream
 	 *              identifier root path
 	 *            * for PULL streams, the stream identifier root path (protocol set in options)
 	 * @param options Configuration with specific details of the HTTP connection.
-	 * @returns The last fitting of a local pipeline that connects the pipe to a remote 
+	 * @returns The last fitting of a local pipeline that connects the pipe to a remote
 	 *          stream processor.
 	 */
 	http(uri: string | URL, options?: HTTPOptions): RedioStream<T>
@@ -522,7 +515,7 @@ abstract class RedioFitting implements PipeFitting {
 }
 
 abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
-	protected _followers: Array<RedioProducer<any> | RedioSink<T>> = []
+	protected _followers: Array<RedioProducer<unknown> | RedioSink<T>> = []
 	protected _pullCheck: Set<number> = new Set<number>()
 	protected _buffer: Liquid<T>[] = []
 	protected _running = true
@@ -620,8 +613,9 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		if (this._followers.length > 0) {
 			throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.')
 		}
-		// eslint-disable-next-line @typescript-eslint/no-use-before-define
-		this._followers = [new RedioMiddle<T, S>(this, valve as ErrorValve<T, S>, options)]
+		this._followers = [
+			new RedioMiddle<T, S>(this, valve as ErrorValve<T, S>, options) as RedioProducer<unknown>
+		]
 		this._pullCheck.clear()
 		return this._followers[0] as RedioPipe<S>
 	}
@@ -630,7 +624,6 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		if (this._followers.length > 0) {
 			throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.')
 		}
-		// eslint-disable-next-line @typescript-eslint/no-use-before-define
 		this._followers = [new RedioSink<T>(this, spout as ErrorSpout<T>, options)]
 		this._pullCheck.clear()
 		return this._followers[0] as RedioStream<T>
@@ -726,12 +719,11 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	// eslint-disable-next-line @typescript-eslint/ban-types
-	findWhere(_props: object, _options?: RedioOptions): RedioPipe<T> {
+	findWhere(_props: Record<string, unknown>, _options?: RedioOptions): RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	group(_f: string | ((t: T) => any), _options?: RedioOptions): RedioPipe<T> {
+	group(_f: string | ((t: T) => unknown), _options?: RedioOptions): RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
@@ -743,7 +735,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	invoke<R>(_method: string, _args: Array<any>, _options?: RedioOptions): RedioPipe<R> {
+	invoke<R>(_method: string, _args: Array<unknown>, _options?: RedioOptions): RedioPipe<R> {
 		throw new Error('Not implemented')
 	}
 
@@ -768,7 +760,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	pickBy(_f: (key: string, value: any) => boolean, _options?: RedioOptions): RedioPipe<T> {
+	pickBy(_f: (key: string, value: unknown) => boolean, _options?: RedioOptions): RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
@@ -850,8 +842,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	// eslint-disable-next-line @typescript-eslint/ban-types
-	where(_props: object, _options?: RedioOptions): RedioPipe<T> {
+	where(_props: Record<string, unknown>, _options?: RedioOptions): RedioPipe<T> {
 		// Filter on object properties
 		throw new Error('Not implemented')
 	}
@@ -883,9 +874,8 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	}
 
 	fork(options?: RedioOptions): RedioPipe<T> {
-		// eslint-disable-next-line @typescript-eslint/no-use-before-define
-		const identity = new RedioMiddle<T, T>(this, (i: any) => i, options)
-		this._followers.push(identity)
+		const identity = new RedioMiddle<T, T>(this, (i: Liquid<T>) => i, options)
+		this._followers.push(identity as RedioProducer<unknown>)
 		return identity
 	}
 
@@ -925,7 +915,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	}
 
 	each(dotoall?: (t: T) => void | Promise<void>, options?: RedioOptions): RedioStream<T> {
-		if (dotoall === undefined) {
+		if (typeof dotoall === 'undefined') {
 			dotoall = (/*t: T*/): void => {
 				/* void */
 			}
@@ -937,9 +927,8 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 				}
 				return
 			}
-			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-			if (isValue(tt)) {
-				await dotoall!(tt)
+			if (isValue(tt) && dotoall) {
+				await dotoall(tt)
 			}
 		}, options)
 	}
@@ -967,8 +956,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	// eslint-disable-next-line @typescript-eslint/ban-types
-	toNodeStream(_streamOptions: object, _options?: RedioOptions): ReadableStream {
+	toNodeStream(_streamOptions: Record<string, unknown>, _options?: RedioOptions): ReadableStream {
 		throw new Error('Not implemented')
 	}
 
@@ -1005,7 +993,7 @@ class RedioStart<T> extends RedioProducer<T> {
 						result.forEach((x) => isValue(x) && this.push(x))
 					} else {
 						// Odd situation where T is an Array<X>
-						this.push(result as unknown as T) 
+						this.push((result as unknown) as T)
 					}
 				} else if (isNil(result)) {
 					// Don't push
@@ -1029,8 +1017,7 @@ class RedioStart<T> extends RedioProducer<T> {
  *  @typeparam T Optional type that the promise resolves to.
  *  @return Value is a promise?
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export function isAPromise<T>(o: any): o is Promise<T> {
+export function isAPromise<T>(o: unknown): o is Promise<T> {
 	return isPromise(o)
 }
 
@@ -1087,7 +1074,7 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 							result.forEach((x) => isValue(x) && this.push(x))
 						} else {
 							// Odd situation where T is an Array<X>
-							this.push(result as unknown as T)
+							this.push((result as unknown) as T)
 						}
 						if (isEnd(v) && result.length > 0 && !isEnd(result[result.length - 1])) {
 							this.push(end)
@@ -1161,7 +1148,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 	private _thatsAllFolks: (() => void) | null = null
 	private _errorFn: ((err: Error) => void) | null = null
 	private _resolve: ((t: Liquid<T>) => void) | null = null
-	private _reject: ((err: any) => void) | null = null
+	private _reject: ((err: unknown) => void) | null = null
 	private _last: Liquid<T> = nil
 
 	constructor(prev: RedioProducer<T>, sinker: ErrorSpout<T>, options?: RedioOptions) {
@@ -1183,7 +1170,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 				} else {
 					callIt = sinker(t)
 				}
-				const promisy: Promise<any> = isAPromise(callIt) ? callIt : Promise.resolve()
+				const promisy: Promise<void> = isAPromise(callIt) ? callIt : Promise.resolve()
 				promisy.then(
 					async (_value: void): Promise<void> => {
 						this._ready = true
@@ -1201,9 +1188,9 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 						this._last = t
 						return Promise.resolve()
 					},
-					(err?: any): void => {
+					(err?: unknown): void => {
 						// this._ready = true
-						reject(err as any | undefined)
+						reject(err as unknown | undefined)
 					}
 				)
 			})
@@ -1219,7 +1206,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 			if (!isNil(v)) {
 				try {
 					await this._sinker(v)
-				} catch(err) {
+				} catch (err) {
 					let handled = false
 					if (this._errorFn) {
 						handled = true
@@ -1296,18 +1283,18 @@ export default function <T>(generator: Generator<T>, options?: RedioOptions): Re
  */
 export default function <T>(data: Array<T>, options?: RedioOptions): RedioPipe<T>
 /**
- * Receive a stream of values of type `T` from another processing node over HTTP/S. This 
+ * Receive a stream of values of type `T` from another processing node over HTTP/S. This
  * is the partner to the [[RedioPipe.http]] method that creates such a stream. Back pressure
  * will be applied across the stream.
  * @param url     Depending on the kind of stream:
- *                * for PULL streams, a URL with protocol, hostname, port and stream 
+ *                * for PULL streams, a URL with protocol, hostname, port and stream
  *                  identifier root path
- *                * for PULL streams, the stream identifier root path (protocol set in options) 
+ *                * for PULL streams, the stream identifier root path (protocol set in options)
  * @param options Configuration with specific details of the HTTP connection.
  * @typeparam T   Type of values in the stream.
  * @return Stream of values received-as-pulled from the remote stream processor.
  */
-export default function<T> (url: string, options?: RedioOptions): RedioPipe<T>
+export default function <T>(url: string, options?: RedioOptions): RedioPipe<T>
 /**
  *  Create a stream of values of type `T` using a [[Funnel]] function, a _thunk_
  *  that is called every time the stream requires a new value. The _thunk_ maybe

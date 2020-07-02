@@ -1,22 +1,70 @@
 {
-  "name": "redioactive",
-  "version": "0.0.3",
-  "description": "Reactive streams for chaining overlapping promises.",
-  "main": "dist/redio.js",
-  "types": "dist/redio.d.ts",
-  "repository": "https://github.com/Streampunk/redioactive.git",
-  "author": "Richard Cartwright <spark@streampunk.media>",
-  "license": "MIT",
-  "private": false,
-  "devDependencies": {
-    "@types/node": "^12.12.42",
-    "@typescript-eslint/eslint-plugin": "^3.0.2",
-    "@typescript-eslint/parser": "^3.0.2",
-    "eslint": "^7.1.0",
-    "eslint-config-prettier": "^6.11.0",
-    "eslint-plugin-prettier": "^3.1.3",
-    "prettier": "^2.0.5",
-    "ts-node": "^8.10.2",
-    "typescript": "^3.9.3"
-  }
+	"name": "redioactive",
+	"version": "0.0.3",
+	"description": "Reactive streams for chaining overlapping promises.",
+	"main": "dist/index.js",
+	"types": "dist/redio.d.ts",
+	"repository": "https://github.com/Streampunk/redioactive.git",
+	"author": "Richard Cartwright <spark@streampunk.media>",
+	"contributors": [
+		"Simon Rogers <scriptorian@streampunk.media"
+	],
+	"license": "MIT",
+	"private": false,
+	"files": [
+		"/dist",
+		"/CHANGELOG.md",
+		"/README.md",
+		"/LICENSE"
+	],
+	"scripts": {
+		"build": "trash dist && yarn build:main",
+		"build:main": "tsc -p tsconfig.json",
+		"lint": "eslint ./src --ext .js,.ts",
+		"lint:fix": "yarn lint -- --fix",
+		"unit": "jest --passWithNoTests",
+		"test": "yarn lint && yarn unit",
+		"test:coverage": "yarn test -- --coverage",
+		"cov": "jest --coverage; open-cli coverage/lcov-report/index.html",
+		"cov-open": "open-cli coverage/lcov-report/index.html",
+		"send-coverage": "codecov",
+		"reset": "git clean -dfx && git reset --hard && yarn"
+	},
+	"devDependencies": {
+		"@types/jest": "^26.0.3",
+		"@types/node": "^12.12.42",
+		"@typescript-eslint/eslint-plugin": "^3.0.2",
+		"@typescript-eslint/parser": "^3.0.2",
+		"codecov": "^3.7.0",
+		"eslint": "^7.1.0",
+		"eslint-config-prettier": "^6.11.0",
+		"eslint-plugin-prettier": "^3.1.3",
+		"husky": "^4.2.5",
+		"jest": "^26.1.0",
+		"lint-staged": "^10.2.11",
+		"open-cli": "^6.0.1",
+		"prettier": "^2.0.5",
+		"trash-cli": "^3.0.0",
+		"ts-jest": "^26.1.1",
+		"ts-node": "^8.10.2",
+		"typescript": "^3.9.3"
+	},
+	"keywords": [
+		"reactive",
+		"streams",
+		"multi-tool"
+	],
+	"husky": {
+		"hooks": {
+			"pre-commit": "lint-staged"
+		}
+	},
+	"lint-staged": {
+		"*.{js,json,md}": [
+			"prettier --write"
+		],
+		"*.ts": [
+			"eslint --fix"
+		]
+	}
 }
