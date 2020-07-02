@@ -241,10 +241,69 @@ interface PipeFitting {
 /**
  *  Configuration options for an endpoint that transports a stream over the
  *  the HTTP protocol.
+ * 
+ *  HTTP streams consist of a RESTful resource at a given path, the _stream root path_. 
+ *  This stream has sub-resources that include an optoinal _stream manifest_ and a sequence of 
+ *  values, where each value in the sequence has an _sequence identifier_ and a reference 
+ *  to the _next_ value in the sequence, which may be computed from a _delta increment). 
+ *  Sequence identifiers can be names, timestamps, counters etc.. These options set - or 
+ *  reference the properties of a stream type `T` - to be used to configure the 
+ *  stream.
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
-export interface HTTPOptions extends RedioOptions {}
-
+export interface HTTPOptions extends RedioOptions {
+	/** HTTP port to use for pull or push. Default is 8765. Set to `-1` to disable. */
+	httpPort?: number
+	/** HTTPS port to use for pull or push. Default is 8766. Set to `-1` to disable.  */
+	httpsPort?: number
+	/** Append the first value of the named property of type `T` to complete the stream 
+	 *  root path, e.g. if the URI contains `/fred/ginger` and the property of `T` called 
+	 *  _extraStreamRoot_ has value `streamId` with value `audio/channel3`, the full stream 
+	 *  root is `/fred/ginger/audio/channel3/`. If undefined, then `/fred/ginger/`.
+	*/
+	extraStreamRoot?: string
+	/** Use the named property of `T` as the identifier for each value flowing down the
+	 *  stream, for example a timestamp or timestamp generator funciton. If omitted,
+	 *  a numerical counter will be used.
+	 */
+	seqId?: string
+	/** Either a number representing an amount to increment the sequence identifier of
+	 *  the name of a property of `T` to use to provide the delta. Defaults to incrementing
+	 *  a counter by 1. Note that the referenced property is itself of type `number | string`,
+	 *  where:
+	 *  * `number` - the value to add to the previous sequence indentifier
+	 *  * `string` - the actual sequence identifier of the next item
+	 */
+	delta?: number | string
+	/** Allow fuzzy matching of stream identifiers. Will allow either a close string match
+	 *  or numerical 10% window around the _current + delta_ value. Default is exact matching.
+	 */
+	fuzzy?: boolean
+	/** Provide the optional manifest that is a description of the entire stream. The 
+	 *  manifest will be available from every received value. If set to a string, the
+	 *  manifest is taken from the first value of property `T` of that name found 
+	 *  in the stream. The default is not to set a manifest.
+	 */
+	manifest?: string | any
+	/** Set if a property of a value of `T` defines the binary payload of an HTTP stream.
+	 *  If defined, any other properties of the value are carried in the HTTP header.
+	*/
+	blob?: string
+	/** Allow multiple clients to pull from the server. Back pressure will be based on
+	 *  the highest value of sequence identifier. Default is one-to-one.
+	 */
+	allowMultiple?: boolean
+	/** How many parallel streams should be used to send the stream. This allows a number
+	 *  of values to be in flight at one time, although the stream will always be 
+	 *  sent and received in order. When undefined, the default value is 1.
+	 */
+	parallel?: number
+	/** How many chunks should the binary payload be split into. In combination with the
+	 *  parallel setting, this may allows for low-latency parallel transport of large
+	 *  binary values, such as video frames. When undefined, the default is 1.
+	 */
+	chunked?: number
+}
 /**
  *  Reactive streams pipeline carrying liquid of a particular type.
  *  @typeparam T Type of liquid travelling down the pipe.
@@ -390,7 +449,20 @@ export interface RedioPipe<T> extends PipeFitting {
 	parallel<P>(n: number, options?: RedioOptions): RedioPipe<P>
 	sequence<S>(options?: RedioOptions): RedioPipe<S>
 	series<S>(options?: RedioOptions): RedioPipe<S>
-	zip<Z>(ys: RedioPipe<Z> | Array<Z>, options?: RedioOptions): RedioPipe<[T, Z]>
+	/**
+	 * Takes two streams and returns a stream of corresponding pairs.
+	 * The size of the resulting stream is the smaller of the two source streams.
+	 * @param ys The stream to combine values with TODO: add Array<Z> support
+	 * @param options Optional configuration
+	 */
+	zip<Z>(ys: RedioPipe<Z>, options?: RedioOptions): RedioPipe<[T, Z]>
+	/**
+	 * Takes a stream and an array of N streams and returns a stream
+	 * of the corresponding (N+1)-tuples.
+	 * @param ys The array of streams to combine values with TODO: add support for a stream of streams
+	 * @param options Optional configuration
+	 */
+	zipEach<Z>(ys: RedioPipe<Z>[], options?: RedioOptions): RedioPipe<[T, ...Z[]]>
 
 	// Consumption
 	/**
@@ -417,6 +489,25 @@ export interface RedioPipe<T> extends PipeFitting {
 	toCallback(f: (err: Error, value: T) => void): RedioStream<T> // Just one value
 	// eslint-disable-next-line @typescript-eslint/ban-types
 	toNodeStream(streamOptions: object, options?: RedioOptions): ReadableStream
+	/**
+	 * Connect a stream to another processing node via HTTP/S. A matching funnel can receive
+	 * the stream. HTTP/S streams must have a stream identifier root path, a unique identifier 
+	 * for each element in the sequence (i.e. a counter or timestamp) and a means to identify 
+	 * the next element (e.g. expected increment).The options provide a way to map the 
+	 * sequence of elements to HTTP headers and payloads. 
+	 * Note that not all kinds of payloads can be transported via HTTP, one of:
+	 * * serializable to JSON object
+	 * * a binary blob (Buffer or equivalent)
+	 * * a simple JSON payload that can be serialized to HTTP headers and a nominated 
+	 *   binary blob property
+	 * @param uri Depending on the kind of stream:
+	 *            * for PUSH streams, a URL with protocol, hostname, port and stream 
+	 *              identifier root path
+	 *            * for PULL streams, the stream identifier root path (protocol set in options)
+	 * @param options Configuration with specific details of the HTTP connection.
+	 * @returns The last fitting of a local pipeline that connects the pipe to a remote 
+	 *          stream processor.
+	 */
 	http(uri: string | URL, options?: HTTPOptions): RedioStream<T>
 
 	// forceEnd (options?: RedioOptions): RedioPipe<T>
@@ -825,7 +916,11 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	zip<Z>(_ys: RedioPipe<Z> | Array<Z>, _options?: RedioOptions): RedioPipe<[T, Z]> {
+	zip<Z>(_ys: RedioPipe<Z>, _options?: RedioOptions): RedioPipe<[T, Z]> {
+		throw new Error('Not implemented')
+	}
+
+	zipEach<Z>(_ys: RedioPipe<Z>[], _options?: RedioOptions): RedioPipe<[T, ...Z[]]> {
 		throw new Error('Not implemented')
 	}
 
@@ -1200,7 +1295,19 @@ export default function <T>(generator: Generator<T>, options?: RedioOptions): Re
  *  @return Stream of values created from the array of data.
  */
 export default function <T>(data: Array<T>, options?: RedioOptions): RedioPipe<T>
-// export default function<T> (url: string, options?: RedioOptions): RedioPipe<T>
+/**
+ * Receive a stream of values of type `T` from another processing node over HTTP/S. This 
+ * is the partner to the [[RedioPipe.http]] method that creates such a stream. Back pressure
+ * will be applied across the stream.
+ * @param url     Depending on the kind of stream:
+ *                * for PULL streams, a URL with protocol, hostname, port and stream 
+ *                  identifier root path
+ *                * for PULL streams, the stream identifier root path (protocol set in options) 
+ * @param options Configuration with specific details of the HTTP connection.
+ * @typeparam T   Type of values in the stream.
+ * @return Stream of values received-as-pulled from the remote stream processor.
+ */
+export default function<T> (url: string, options?: RedioOptions): RedioPipe<T>
 /**
  *  Create a stream of values of type `T` using a [[Funnel]] function, a _thunk_
  *  that is called every time the stream requires a new value. The _thunk_ maybe
