@@ -69,7 +69,7 @@ export function isAnError(t: any): t is Error {
 export type Liquid<T> = T | RedioEnd | RedioNil | Error
 /** A collection of values that can flow down a stream. This type is used
  *  when a processing stage produces more than it consumes, a _one-to-many_
- *  function, to represent a sequence of values to be flattenned into the stream.
+ *  function, to represent a sequence of values to be flattened into the stream.
  */
 export type LotsOfLiquid<T> = Liquid<T> | Array<Liquid<T>>
 
@@ -108,17 +108,35 @@ export interface Valve<S, T> {
 	 *  A function that consumes a single item from an incoming stream and produces
 	 *  values for an outgoing stream. The function an return [[nil]] if the
 	 *  input produces no output. Set the [[RedioOptions.oneToMany]] flag if the
-	 *  funciton can produce more than one value per input and the output Will
-	 *  be flattenned.
+	 *  funciton can produce more than one value per input and the output will
+	 *  be flattened.
 	 *  @param s Single item to consume.
 	 *  @return Promise to produce item(s) or the direct production of item(s).
 	 */
 	(s: S | RedioEnd): Promise<LotsOfLiquid<T>> | LotsOfLiquid<T>
 }
 
-interface FullValve<S, T> extends Valve<S, T> {
+/**
+ *  A funciton that can be used to process an incoming stream of liquid or errors 
+ *  and create a possibly different kind of stream of liquid.
+ *  This is an advanced feature. In normal use, allow redioactive to handle and 
+ *  propogate errors.
+ *  @typeparam S Source type for the itemsconsumed.
+ *  @typeparam T Target type for items produced.
+ */
+export interface ErrorValve<S, T> {	
+	/**
+	 *  A function that consumes a single item or error from an incoming stream and produces
+	 *  values for an outgoing stream. The function an return [[nil]] if the
+	 *  input produces no output. Set the [[RedioOptions.oneToMany]] flag if the
+	 *  funciton can produce more than one value per input and the output will
+	 *  be flattened. Also set [[RedioOptions.processError]].
+	 *  @param s Single item to consume.
+	 *  @return Promise to produce item(s) or the direct production of item(s).
+	 */
 	(s: Liquid<S>): Promise<LotsOfLiquid<T>> | LotsOfLiquid<T>
 }
+
 /**
  *  Function at the end of a pipe for handling the output of a stream.
  *  @typeparam T Type of items at the end of the stream.
@@ -132,7 +150,21 @@ export interface Spout<T> {
 	(t: T | RedioEnd): Promise<void> | void
 }
 
-interface FullSpout<T> extends Spout<T> {
+/**
+ *  Function at the end of a pipe for handling the output and errors of a stream.
+ *  This is an advanced feature. In normal use, allow redioactive to handle and 
+ *  propogate errors.
+ *  @typeparam T Type of items at the end of the stream.
+ */
+export interface ErrorSpout<T> {
+	/**
+	 *  A function that consumes a single item or an error at the end of a stream, 
+	 *  executing a side effect or operation that acts on the value. Also set
+	 *  [[RedioOptions.processError]].
+	 *  This is an advanced feature. In normal use, allow redioactive to handle and 
+ 	 *  propogate errors.
+	 *  @param t Item to consume.
+	 */
 	(t: Liquid<T>): Promise<void> | void
 }
 
@@ -142,7 +174,7 @@ interface FullSpout<T> extends Spout<T> {
  *  asynchronously to push values into the stream. The generator function will
  *  not be called again until `next` has been called. Remeber to push [[end]]
  *  to complete the stream, otherwise it is infinite.
- *  Note: Set `oneToMany` to true for arrays to be flattenned to a stream of
+ *  Note: Set `oneToMany` to true for arrays to be flattened to a stream of
  *  separate values.
  *  @typeparam T Type of values to be pushed onto the stream.
  */
@@ -185,7 +217,7 @@ export interface RedioOptions {
 	/** Set this flag to enerate debugging information for this. */
 	debug?: boolean
 	/** Set this flag if the stage can produce arrays of output values
-	 *  ([[LotsOfLiquid]]) that should be flattenned.
+	 *  ([[LotsOfLiquid]]) that should be flattened.
 	 */
 	oneToMany?: boolean
 	/** Set this flag to cause an [unhandled rejection](https://nodejs.org/api/process.html#process_event_unhandledrejection)
@@ -194,7 +226,8 @@ export interface RedioOptions {
 	 */
 	rejectUnhandled?: boolean
 	/** Set this flag to allow a valve to process an error. Defaults to `false` and
-	 *  must be set for each stage that it applies to.
+	 *  must be set for each stage that it applies to. Use in conjunction with
+	 *  [[ErrorValve]] and [[ErrorSpout]].
 	 */
 	processError?: boolean
 }
@@ -226,13 +259,13 @@ export interface RedioPipe<T> extends PipeFitting {
 	 *  @param options Optional options to apply at this stage.
 	 *  @returns Pipe containing the stream of transformed elements.
 	 */
-	valve<S>(valve: Valve<T, S>, options?: RedioOptions): RedioPipe<S>
+	valve<S>(valve: Valve<T, S> | ErrorValve<T, S>, options?: RedioOptions): RedioPipe<S>
 	/**
 	 *  Apply a [[Spout|spout]] function at the end of pipe.
 	 *  @param spout  Spout function to apply to each element.
 	 *  @returns A completed stream.
 	 */
-	spout(spout: Spout<T>, options?: RedioOptions): RedioStream<T>
+	spout(spout: Spout<T> | ErrorSpout<T>, options?: RedioOptions): RedioStream<T>
 
 	// Transforms
 	/**
@@ -492,22 +525,22 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		return Promise.resolve()
 	}
 
-	valve<S>(valve: Valve<T, S>, options?: RedioOptions): RedioPipe<S> {
+	valve<S>(valve: Valve<T, S> | ErrorValve<T, S>, options?: RedioOptions): RedioPipe<S> {
 		if (this._followers.length > 0) {
 			throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.')
 		}
 		// eslint-disable-next-line @typescript-eslint/no-use-before-define
-		this._followers = [new RedioMiddle<T, S>(this, valve as FullValve<T, S>, options)]
+		this._followers = [new RedioMiddle<T, S>(this, valve as ErrorValve<T, S>, options)]
 		this._pullCheck.clear()
 		return this._followers[0] as RedioPipe<S>
 	}
 
-	spout(spout: Spout<T>, options?: RedioOptions): RedioStream<T> {
+	spout(spout: Spout<T> | ErrorSpout<T>, options?: RedioOptions): RedioStream<T> {
 		if (this._followers.length > 0) {
 			throw new Error('Cannot consume a stream that already has a consumer. Use fork or observe.')
 		}
 		// eslint-disable-next-line @typescript-eslint/no-use-before-define
-		this._followers = [new RedioSink<T>(this, spout as FullSpout<T>, options)]
+		this._followers = [new RedioSink<T>(this, spout as ErrorSpout<T>, options)]
 		this._pullCheck.clear()
 		return this._followers[0] as RedioStream<T>
 	}
@@ -907,11 +940,11 @@ export function isAPromise<T>(o: any): o is Promise<T> {
 }
 
 class RedioMiddle<S, T> extends RedioProducer<T> {
-	private _middler: FullValve<S, T>
+	private _middler: ErrorValve<S, T>
 	private _ready = true
 	private _prev: RedioProducer<S>
 
-	constructor(prev: RedioProducer<S>, middler: FullValve<S, T>, options?: RedioOptions) {
+	constructor(prev: RedioProducer<S>, middler: ErrorValve<S, T>, options?: RedioOptions) {
 		super(Object.assign(prev.options, { processError: false }, options))
 		this._middler = (s: Liquid<S>): Promise<Liquid<T> | LotsOfLiquid<T>> =>
 			new Promise<LotsOfLiquid<T>>((resolve, reject) => {
@@ -1025,7 +1058,7 @@ export interface RedioStream<T> extends PipeFitting {
 }
 
 class RedioSink<T> extends RedioFitting implements RedioStream<T> {
-	private _sinker: FullSpout<T>
+	private _sinker: ErrorSpout<T>
 	private _prev: RedioProducer<T>
 	private _ready = true
 	private _debug: boolean
@@ -1036,7 +1069,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 	private _reject: ((err: any) => void) | null = null
 	private _last: Liquid<T> = nil
 
-	constructor(prev: RedioProducer<T>, sinker: Spout<T> & FullSpout<T>, options?: RedioOptions) {
+	constructor(prev: RedioProducer<T>, sinker: ErrorSpout<T>, options?: RedioOptions) {
 		super()
 		this._debug =
 			options && Object.prototype.hasOwnProperty.call(options, 'debug')

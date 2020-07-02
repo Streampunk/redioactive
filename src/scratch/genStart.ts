@@ -1,4 +1,4 @@
-import { default as redio, end } from '../redio'
+import { default as redio, end, RedioEnd } from '../redio'
 
 const wait = async (t: number): Promise<void> =>
 	new Promise((resolve) => {
@@ -23,7 +23,7 @@ const doStream = async (delay: number): Promise<void> => {
 	return new Promise<void>((resolve) => {
 		console.log('Connecting', gen)
 		gen
-			.valve<number>(async (count) => count, { debug: delay > 0 })
+			.valve<number>(async (count:number | RedioEnd) => count, { debug: delay > 0 })
 			.each(console.log, { debug: true })
 			.done(async () => {
 				console.log('There we go!')
