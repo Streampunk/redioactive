@@ -1,4 +1,4 @@
-import { Spout, Liquid, HTTPOptions, literal, isNil, isEnd } from './redio'
+import { Spout, Liquid, HTTPOptions, literal, isNil, isEnd, RedioEnd } from './redio'
 import { Server, createServer } from 'http'
 import { Server as ServerS, createServer as createServerS } from 'https'
 import { isError } from 'util'
@@ -25,8 +25,9 @@ interface PushInfo extends ConInfo {
 	type: 'push'
 }
 
-export function httpSource<T>(uri: string, options: HTTPOptions): Spout<T> {
-	const tChest: Array<T> = []
+export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
+	if (!options) throw new Error('HTTP options must be specified - for now.')
+	const tChest: Array<T | RedioEnd> = []
 	let info: ConInfo
 	if (uri.toLowerCase().startsWith('http')) {
 		info = literal<PushInfo>({
@@ -41,6 +42,9 @@ export function httpSource<T>(uri: string, options: HTTPOptions): Spout<T> {
 			if (!server) {
 				server = createServer()
 				servers[options.httpPort] = server
+				server.listen(options.httpPort, () => {
+					console.log(`Server for uri listening on ${options.httpPort}`)
+				})
 			}
 		}
 		if (options.httpsPort) {
@@ -64,7 +68,7 @@ export function httpSource<T>(uri: string, options: HTTPOptions): Spout<T> {
 	console.log(info)
 
 	return async (x: Liquid<T>): Promise<void> => {
-		if (isEnd(x) || isNil(x) || isError(x)) {
+		if (isNil(x) || isError(x)) {
 			return
 		}
 		tChest.push(x)

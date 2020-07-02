@@ -12,6 +12,7 @@
 import { types } from 'util'
 import { EventEmitter } from 'events'
 import { URL } from 'url'
+import { httpSource } from './http-source'
 const { isPromise } = types
 
 /** Type of a value sent down a stream to indicate that it has ended. No values
@@ -960,8 +961,11 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	http(_uri: string | URL, _options?: RedioOptions): RedioStream<T> {
-		throw new Error('Not implemented')
+	http(uri: string | URL, options?: RedioOptions): RedioStream<T> {
+		if (typeof uri !== 'string') {
+			uri = uri.toString()
+		}
+		return this.spout(httpSource<T>(uri, options))
 	}
 
 	get options(): RedioOptions {
