@@ -10,7 +10,7 @@
  *  inspired by Highland.js and adds support for configurable buffers at each stage.
  */
 
-import { types, isError } from 'util'
+import { types } from 'util'
 import { EventEmitter } from 'events'
 import { URL } from 'url'
 const { isPromise } = types
@@ -242,7 +242,7 @@ export interface RedioPipe<T> extends PipeFitting {
 	 *  @param options Optional configuration.
 	 *  @returns Pipe containing stream with the additional element.
 	 */
-	append(v: Liquid<T>, options?: RedioOptions): RedioPipe<T>
+	append(v: T | RedioEnd | Promise<T>, options?: RedioOptions): RedioPipe<T>
 	batch(n: Promise<number> | number, options?: RedioOptions): RedioPipe<Array<T>>
 	collect(options?: RedioOptions): RedioPipe<Array<T>>
 	compact(options?: RedioOptions): RedioPipe<T>
@@ -512,7 +512,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		return this._followers[0] as RedioStream<T>
 	}
 
-	append(v: Liquid<T>, options?: RedioOptions): RedioPipe<T> {
+	append(v: T | RedioEnd | Promise<T>, options?: RedioOptions): RedioPipe<T> {
 		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
 			if (this._debug) {
 				console.log(`Append at end ${isEnd(t)} value ${t}`)
