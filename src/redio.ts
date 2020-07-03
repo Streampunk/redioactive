@@ -340,11 +340,11 @@ export interface RedioPipe<T> extends PipeFitting {
 	doto(f: (t: T) => Promise<void> | void, options?: RedioOptions): RedioPipe<T>
 	/**
 	 *  Ignores the first `num` values of the stream and emits the rest.
-	 *  @param num     Number of values to drop from the source.
+	 *  @param num     Number of values to drop from the source. Default is 1.
 	 *  @param options Optional configuration.
 	 *  @returns Pipe containing a stream of values with the first `num` values missing.
 	 */
-	drop(num: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
+	drop(num?: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
 	/**
 	 *  Apply the given function to every error in the stream. All other values
 	 *  are passed on. The error can be transformed into a value of the stream
@@ -677,10 +677,13 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		)
 	}
 
-	drop(num: number | Promise<number>, options?: RedioOptions): RedioPipe<T> {
+	drop(num?: number | Promise<number>, options?: RedioOptions): RedioPipe<T> {
+		if (typeof num === 'undefined') {
+			num = 1
+		}
 		let count = 0
 		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
-			if (!isEnd(t)) {
+			if (!isEnd(t) && num) {
 				return count++ >= (await num) ? t : nil
 			}
 			return end
