@@ -33,7 +33,7 @@ describe('Test the each processing of values', () => {
 				return new Promise((resolve) => setTimeout(resolve, t))
 			}
 		)
-		await redio([100, 200, 300, 400]).each(wait, { debug: true }).toPromise()
+		await redio([100, 200, 300, 400]).each(wait, { debug: false }).toPromise()
 		expect(wait).toHaveBeenCalledTimes(4)
 		expect(wait).toHaveBeenLastCalledWith(400)
 	})

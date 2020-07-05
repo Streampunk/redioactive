@@ -1288,7 +1288,7 @@ export default function <T>(generator: Generator<T>, options?: RedioOptions): Re
  *  @typeparam T   Type of values in the source array pushed onto the stream.
  *  @return Stream of values created from the array of data.
  */
-export default function <T>(data: Array<T>, options?: RedioOptions): RedioPipe<T>
+export default function <T>(data: Array<T | RedioNil>, options?: RedioOptions): RedioPipe<T>
 /**
  * Receive a stream of values of type `T` from another processing node over HTTP/S. This
  * is the partner to the [[RedioPipe.http]] method that creates such a stream. Back pressure
@@ -1346,7 +1346,11 @@ export default function <T>(
 					}
 				}
 				const next = (): void => {
-					resolve(values)
+					if (values.indexOf(end) >= 0) {
+						resolve(end)
+					} else {
+						resolve(values)
+					}
 				}
 				try {
 					args1(push, next)

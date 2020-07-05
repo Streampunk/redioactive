@@ -8,7 +8,7 @@ module.exports = {
 	transform: {
 		'^.+\\.(ts|tsx)$': 'ts-jest'
 	},
-	testMatch: ['**/__tests__/**/*.spec.(ts|js)'],
+	testMatch: ['**/__tests__/**/*.spec.(ts)'],
 	testPathIgnorePatterns: ['integrationTests'],
 	testEnvironment: 'node',
 	coverageThreshold: {
