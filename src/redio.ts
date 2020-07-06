@@ -299,10 +299,21 @@ export interface HTTPOptions extends RedioOptions {
 	 *  binary values, such as video frames. When undefined, the default is 1.
 	 */
 	chunked?: number
+	/** How often should the stream be checked for for new values. This allows pull clients
+	 *  to back off their requests to match the natural rythmn of the stream. The value
+	 *  is measured in miliseconds.
+	 */
+	cadence?: number
 }
 
+/**
+ * Options specific to processing
+ * [Node.JS readable streams](https://nodejs.org/docs/latest-v12.x/api/stream.html#stream_readable_streams).
+ */
 interface StreamOptions extends RedioOptions {
-	/** Number of bytes to requests on each read of the stream. */
+	/** Number of bytes to requests on each read of the stream. Default depends on
+	 *  platform and stream type.
+	 */
 	chunkSize?: number
 	/** Encoding to set to convert buffers to strings. Leave unset for buffers. */
 	encoding?: string
