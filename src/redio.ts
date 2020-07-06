@@ -13,6 +13,8 @@ import { types } from 'util'
 import { EventEmitter } from 'events'
 import { URL } from 'url'
 import { httpSource } from './http-source'
+import { Readable } from 'stream'
+import { ReadStream } from 'fs'
 const { isPromise } = types
 
 /** Type of a value sent down a stream to indicate that it has ended. No values
@@ -297,6 +299,13 @@ export interface HTTPOptions extends RedioOptions {
 	 *  binary values, such as video frames. When undefined, the default is 1.
 	 */
 	chunked?: number
+}
+
+interface StreamOptions extends RedioOptions {
+	/** Number of bytes to requests on each read of the stream. */
+	chunkSize?: number
+	/** Encoding to set to convert buffers to strings. Leave unset for buffers. */
+	encoding?: string
 }
 /**
  *  Reactive streams pipeline carrying liquid of a particular type.
@@ -1267,8 +1276,31 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 // 	}, 750)
 // }))
 
-// export default function<T> (iterable: Iterable<T>, options?: RedioOptions): RedioPipe<T>
-// export default function<T> (iterator: Iterator<T>, options?: RedioOptions): RedioPipe<T>
+function isReadableStream(x: any): x is Readable {
+	return (
+		x !== null &&
+		typeof x === 'object' &&
+		typeof x.pipe === 'function' &&
+		x.readable !== false &&
+		typeof x._read === 'function' &&
+		typeof x._readableState === 'object'
+	)
+}
+
+/**
+ * Create a stream of values from an object that supports the [Javascript _Iterable
+ * protocol_](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols#The_iterable_protocol).
+ * This includes the standard built-in types [Map](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map)
+ * and [Set](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set).
+ *
+ * Note that as it is not possible to know reflectively whether a particular object implements
+ * the [_Iterator protocol_](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols#The_iterator_protocol),
+ * create an Iterable object with an iterator function.
+ * @param iterable Iterable object containing the values for the stream.
+ * @param options  Optional configuration.
+ * @returns Stream of values from the iterable provided.
+ */
+export default function <T>(iterable: Iterable<T>, options?: RedioOptions): RedioPipe<T>
 /**
  *  Create a stream of values of type `T` using a lazy [[Generator]] function. A
  *  generator function receives callback functions `push` and `next` that it uses
@@ -1279,7 +1311,17 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
  *  @return Stream of values _pushed_ by the generator.
  */
 export default function <T>(generator: Generator<T>, options?: RedioOptions): RedioPipe<T>
-// export default function<T> (stream: ReadableStream<T>): RedioPipe<T>
+/**
+ * Create a stream from a [Node.JS Readable stream](https://nodejs.org/docs/latest-v12.x/api/stream.html#stream_readable_streams).
+ * Back pressure will be applied as required, slowing stream reading down to the acceptable
+ * rate. Use the `chunkSize` options to requests a specific size of chunk and `encoding` to
+ * specify a string encoding.
+ * @param stream  Node.JS readable stream to turn into a redioactive stream.
+ * @param options Optional configuration, including [[StreamOptions|stream details]].
+ * @typeparam T   Normally a `Buffer` or a `string`, but could be `any` in object mode.
+ * @return Stream of values created by consuming a Node.JS stream.
+ */
+export default function <T>(stream: Readable | ReadStream, options?: StreamOptions): RedioPipe<T>
 // export default function<T> (e: EventEmitter, eventName: string, options?: RedioOptions): RedioPipe<T>
 /**
  *  Create a stream of values from the given array.
@@ -1317,16 +1359,8 @@ export default function <T>(url: string, options?: RedioOptions): RedioPipe<T>
 export default function <T>(funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T>
 /** Implementation of the default stream generator function. Use an override. */
 export default function <T>(
-	args1:
-		| Funnel<T>
-		| string
-		| Array<T>
-		| EventEmitter
-		| ReadableStream<T>
-		| Generator<T>
-		| Iterable<T>
-		| Iterator<T>,
-	args2?: RedioOptions | string,
+	args1: Funnel<T> | string | Array<T> | EventEmitter | Readable | Generator<T> | Iterable<T>,
+	args2?: RedioOptions | StreamOptions | HTTPOptions | string,
 	_args3?: RedioOptions
 ): RedioPipe<T> | null {
 	if (typeof args1 === 'function') {
@@ -1376,6 +1410,68 @@ export default function <T>(
 			}
 			return args1[index++]
 		}, options)
+	}
+	if (typeof args1 === 'object' && typeof (args1 as any)[Symbol.iterator] === 'function') {
+		const it: Iterator<T> = (args1 as any)[Symbol.iterator]()
+		const options: RedioOptions | undefined = args2 as RedioOptions | undefined
+		const itGenny: Funnel<T> = () =>
+			new Promise<Liquid<T>>((resolve, reject) => {
+				try {
+					const nextThing = it.next()
+					if (nextThing.done) {
+						resolve(end)
+					} else {
+						resolve(nextThing.value ? nextThing.value : nil)
+					}
+				} catch (err) {
+					reject(err)
+				}
+			})
+		return new RedioStart<T>(itGenny, options)
+	}
+	if (isReadableStream(args1)) {
+		const options: StreamOptions | undefined = args2 as StreamOptions | undefined
+		let rejector: (reason?: any) => void = (err) => {
+			console.error('Redioactive: unexpected stream error: ', err)
+		}
+		let ended = false
+		args1.on('error', (err) => {
+			rejector(err)
+		})
+		args1.on('end', () => {
+			ended = true
+		})
+		args1.on('close', () => {
+			ended = true
+		})
+		if (options && options.encoding) {
+			args1.setEncoding(options.encoding)
+		}
+		const strGenny: Funnel<T> = () => {
+			return new Promise<Liquid<T>>((resolve, reject) => {
+				rejector = (err) => {
+					reject(err)
+				}
+				const chunk = args1.read(options && options.chunkSize)
+				if (chunk !== null) {
+					resolve(chunk)
+				} else {
+					if (ended) {
+						resolve(end)
+						return
+					}
+					args1.once('readable', () => {
+						const chunk = args1.read(options && options.chunkSize)
+						if (chunk !== null) {
+							resolve(chunk)
+						} else {
+							resolve(end)
+						}
+					})
+				}
+			})
+		}
+		return new RedioStart<T>(strGenny, options)
 	}
 	return null
 }

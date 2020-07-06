@@ -1,4 +1,5 @@
 import { default as redio, Liquid, end, Funnel, Generator, RedioEnd, nil } from '../redio'
+import fs from 'fs'
 
 describe('Generate a stream by sync thunk', () => {
 	const gen = (x: number) => {
@@ -103,5 +104,47 @@ describe('Generate a stream from an array', () => {
 	test('Generate with nil values', async () => {
 		const a = [0, nil, 2, nil, 4]
 		await expect(redio(a).toArray()).resolves.toEqual([0, 2, 4])
+	})
+})
+
+describe('Generator a stream from an iterable', () => {
+	test('Set with no values', async () => {
+		await expect(redio(new Set()).toArray()).resolves.toHaveLength(0)
+	})
+	test('Set with one value', async () => {
+		await expect(redio(new Set([1])).toArray()).resolves.toEqual([1])
+	})
+	test('Set with 4 values', async () => {
+		await expect(redio(new Set([1, 2, 3, 4])).toArray()).resolves.toHaveLength(4)
+	})
+	test('Map with 4 values', async () => {
+		await expect(
+			redio(
+				new Map([
+					[1, 'one'],
+					[2, 'two']
+				])
+			).toArray()
+		).resolves.toHaveLength(2)
+	})
+})
+
+describe('Generator from readable', () => {
+	test('Read this file', async () => {
+		await expect(
+			redio(fs.createReadStream('src/__tests__/generator.spec.ts')).toArray()
+		).resolves.toHaveLength(1)
+	})
+	test('Read this file in smaller chunks', async () => {
+		const stats = fs.statSync('src/__tests__/generator.spec.ts')
+		const expectedChunks = (stats.size / 256) | 0
+		await expect(
+			redio(fs.createReadStream('src/__tests__/generator.spec.ts'), { chunkSize: 256 }).toArray()
+		).resolves.toHaveLength(expectedChunks)
+	})
+	test('Read this file as a string', async () => {
+		await expect(
+			redio(fs.createReadStream('src/__tests__/generator.spec.ts'), { encoding: 'utf8' }).toArray()
+		).resolves.toEqual(expect.arrayContaining([expect.stringMatching('imp(o)rt')]))
 	})
 })
