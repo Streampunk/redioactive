@@ -246,6 +246,9 @@ interface PipeFitting {
  *  Sequence identifiers can be names, timestamps, counters etc.. These options set - or
  *  reference the properties of a stream type `T` - to be used to configure the
  *  stream.
+ *
+ *  The size of any buffer used along the path is defined by the `RedioOptions.bufferSizeMax`
+ *  property. This includes how many values are available to be pulled.
  */
 export interface HTTPOptions extends RedioOptions {
 	/** HTTP port to use for pull or push. Default is 8765. Set to `-1` to disable. */
@@ -272,9 +275,12 @@ export interface HTTPOptions extends RedioOptions {
 	 */
 	delta?: number | string
 	/** Allow fuzzy matching of stream identifiers. Will allow either a close string match
-	 *  or numerical 10% window around the _current + delta_ value. Default is exact matching.
+	 *  or numerical window around the _current + delta_ value. The value must be between
+	 * `0.0` and `0.9`, with `0.0` being an exact match is required, `0.1` is 10% either side
+	 *  of the average gap and `0.9` is 90% either side of the average gap. Default is exact
+	 * matching with `0.0`.
 	 */
-	fuzzy?: boolean
+	fuzzy?: number
 	/** Provide the optional manifest that is a description of the entire stream. The
 	 *  manifest will be available from every received value. If set to a string, the
 	 *  manifest is taken from the first value of property `T` of that name found
@@ -285,6 +291,12 @@ export interface HTTPOptions extends RedioOptions {
 	 *  If defined, any other properties of the value are carried in the HTTP header.
 	 */
 	blob?: string
+	/** Content-Type header to use for blob payloads. This defaults to
+	 *  `application/octet-stream` but can be set to any MIME type. For example, if you
+	 *  are sending a sequence of JPEG images, use the opportunity to set `image/jpeg` to
+	 *  help with debugging from a browser.
+	 */
+	contentType?: string
 	/** Allow multiple clients to pull from the server. Back pressure will be based on
 	 *  the highest value of sequence identifier. Default is one-to-one.
 	 */
