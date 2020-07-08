@@ -280,6 +280,7 @@ export interface HTTPOptions extends RedioOptions {
 	 *  of the average gap and `0.9` is 90% either side of the average gap. Default is exact
 	 * matching with `0.0`.
 	 */
+	// TODO range check
 	fuzzy?: number
 	/** Provide the optional manifest that is a description of the entire stream. The
 	 *  manifest will be available from every received value. If set to a string, the
@@ -297,10 +298,13 @@ export interface HTTPOptions extends RedioOptions {
 	 *  help with debugging from a browser.
 	 */
 	contentType?: string
-	/** Allow multiple clients to pull from the server. Back pressure will be based on
-	 *  the highest value of sequence identifier. Default is one-to-one.
+	/** Apply back pressure based on how much of the streams has been read. Back pressure
+	 *  will be based on the the value with the highest sequence identifier being transferred
+	 *  to a stream receiver. For pull streams, more than one receiver may exist. Wihout back
+	 *  pressure, the oldest bufferred values may be dropped from the internal buffer without
+	 *  being transforred. The default is `true` - apply back pressure.
 	 */
-	allowMultiple?: boolean
+	backPressure?: boolean
 	/** How many parallel streams should be used to send the stream. This allows a number
 	 *  of values to be in flight at one time, although the stream will always be
 	 *  sent and received in order. When undefined, the default value is 1.

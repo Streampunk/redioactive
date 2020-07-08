@@ -1,5 +1,5 @@
 import { Spout, Liquid, HTTPOptions, literal, isNil, RedioEnd, isEnd } from './redio'
-import { Server, createServer, IncomingMessage, ServerResponse } from 'http'
+import { Server, createServer, IncomingMessage, ServerResponse, STATUS_CODES } from 'http'
 import { Server as ServerS, createServer as createServerS } from 'https'
 import { isError } from 'util'
 import { URL } from 'url'
@@ -165,6 +165,8 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			serverS,
 			root
 		})
+
+		console.log(info, streamIDs)
 	}
 
 	let fuzzyGap: number = (options && options.fuzzy) || 0.0
@@ -231,9 +233,13 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					return endStream(res)
 				}
 				if (id.startsWith('start')) {
-					// initialize stream and redirect
+					// initialize stream and redirect to first available
 					return
 				}
+				if (id.startsWith('latest')) {
+					// for live streams - get the latest
+				}
+
 				const value = fuzzyMatch(id)
 				if (value) {
 					res.setHeader('Redioactive-Id', value.id)
@@ -253,11 +259,43 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					}
 
 					res.on('finish', () => {
+						// Relying on undocument features of promises that you can safely resolve twice
 						value.nextFn()
 					})
 					return
 				} else {
-					// 404 or miss
+					// TODO (fuzzy matches) next - delay response
+					let [status, message] = [404, '']
+					switch (info.idType) {
+						case IdType.counter:
+						case IdType.number:
+							if (+id < lowWaterMark) {
+								status = 410 // Gone
+								message = `Request for value with sequence identifier "${id}" that is before the current low water mark of "${lowWaterMark}".`
+							} else if (+id > highWaterMark) {
+								message = `Request for value with sequence identifier "${id}" that is beyind the current high water mark of "${highWaterMark}".`
+							} else {
+								message = `Unmatched in-range request for a value with a sequence identifier "${id}".`
+							}
+							break
+						case IdType.string:
+							message = `Unmatched string sequence identifier "${id}".`
+							break
+					}
+					const json = JSON.stringify(
+						{
+							status,
+							statusMessage: STATUS_CODES[status],
+							message
+						},
+						null,
+						2
+					)
+					res.setHeader('Content-Type', 'application/json')
+					res.setHeader('Content-Length', `${Buffer.byteLength(json, 'utf8')}`)
+					res.statusCode = status
+					res.end(json, 'utf8')
+					return
 				}
 			}
 		}
@@ -274,7 +312,8 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			uri,
 			url,
 			streamIDs,
-			options
+			options,
+			ended
 		}
 		const debugString = JSON.stringify(debugInfo, null, 2)
 		res.setHeader('Content-Type', 'application/json')
@@ -288,11 +327,20 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 				info.server &&
 					info.server.close(() => {
 						isPull(info) && delete streamIDs[info.root]
-						console.log(`Server on port closed.`)
+						isPull(info) &&
+							console.log(`Server on port ${info.server?.address()} closed.`, streamIDs)
 					})
 				res.setHeader('Content-Type', 'application/json')
 				res.setHeader('Content-Length', 2)
 				res.end('OK', 'utf8')
+				delete streamIDs[info.root]
+				if (
+					!Object.values(streamIDs).some(
+						(x) => isPull(info) && x.httpPort && x.httpPort === info.httpPort
+					)
+				) {
+					isPull(info) && info.httpPort && delete servers[info.httpPort]
+				}
 			} catch (err) {
 				console.error(
 					`Redioactive: HTTP source: error closing ${info.protocol} ${info.type} stream: ${err.message}`
@@ -393,6 +441,8 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 	let idCounter = 0
 	let ended = false
 	const bufferSize = (options && options.bufferSizeMax) || 10
+	let highWaterMark: string | number = 0
+	let lowWaterMark: string | number = 0
 	return async (t: Liquid<T>): Promise<void> =>
 		new Promise((resolve, reject) => {
 			if (isNil(t) || isError(t)) {
@@ -416,6 +466,9 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			const tr: Record<string, unknown> = t as Record<string, unknown>
 			const currentId =
 				info.idType === IdType.counter ? idCounter : <number | string>tr[<string>options.seqId]
+			if (idCounter === 0) {
+				lowWaterMark = currentId
+			}
 			let nextId: string | number
 			switch (info.delta) {
 				case DeltaType.one:
@@ -463,12 +516,20 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					errorFn: reject
 				})
 			)
+			highWaterMark = currentId
 			if (tChest.size > bufferSize) {
 				const keys = tChest.keys()
 				const toRemove = tChest.size - bufferSize
 				for (let x = 0; x < toRemove; x++) {
 					tChest.delete(keys.next().value)
 				}
+				lowWaterMark = keys.next().value
+			}
+			if (
+				tChest.size < bufferSize || // build the initial buffer
+				(options && options.backPressure === false)
+			) {
+				setImmediate(resolve)
 			}
 			if (isEnd(t)) {
 				ended = true
