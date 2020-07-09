@@ -320,6 +320,11 @@ export interface HTTPOptions extends RedioOptions {
 	 *  is measured in miliseconds.
 	 */
 	cadence?: number
+	/** Maximum time that any HTTP request or response should wait before timing out.
+	 *  For example, when requesting the next value of a stream by pull, either the next
+	 *  value is produced within the time interval or a 404/410 response is generated.
+	 */
+	timeout?: number
 }
 
 /**

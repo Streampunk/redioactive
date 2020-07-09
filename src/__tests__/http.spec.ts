@@ -31,14 +31,56 @@ describe('Run a sequence of pull tests', () => {
 			})
 			expect(debug.body.tChestSize).toBe(4)
 			expect(debug.body.ended).toBe(true)
-			console.log(debug.body)
+		})
+		test('Check start redirect', async () => {
+			const starter = await got<any>('http://localhost:8001/my/stream/id/start', {
+				followRedirect: false
+			})
+			expect(starter.headers['location']).toBeTruthy()
+			expect(starter.headers['location']).toMatch('http:')
+			expect(starter.headers['location']).toMatch(':8001')
+			expect(starter.headers['location']).toMatch('/my/stream/id')
+			expect(starter.headers['location']?.endsWith('/1')).toBe(true)
+
+			expect(starter.headers['redioactive-bodytype']).toBe('primitive')
+			expect(starter.headers['redioactive-idtype']).toBe('counter')
+			expect(starter.headers['redioactive-deltatype']).toBe('one')
+			expect(starter.headers['redioactice-cadence']).toBeUndefined()
+			expect(starter.headers['redioactive-buffersize']).toBe('10')
+			expect(starter.headers['content-length']).toBe('0')
+		})
+		test('Check latest redirect', async () => {
+			const latest = await got<any>('http://localhost:8001/my/stream/id/latest', {
+				followRedirect: false
+			})
+			expect(latest.headers['location']).toBeTruthy()
+			expect(latest.headers['location']).toMatch('http:')
+			expect(latest.headers['location']).toMatch(':8001')
+			expect(latest.headers['location']).toMatch('/my/stream/id')
+			expect(latest.headers['location']?.endsWith('/4')).toBe(true)
+
+			expect(latest.headers['redioactive-bodytype']).toBe('primitive')
+			expect(latest.headers['redioactive-idtype']).toBe('counter')
+			expect(latest.headers['redioactive-deltatype']).toBe('one')
+			expect(latest.headers['redioactice-cadence']).toBeUndefined()
+			expect(latest.headers['redioactive-buffersize']).toBe('10')
+			expect(latest.headers['content-length']).toBe('0')
 		})
 		test('Pull the first value', async () => {
 			const value = await got('http://localhost:8001/my/stream/id/1', { responseType: 'json' })
 			expect(value.body).toBe(1)
 			expect(value.headers['content-type']).toBe('application/json')
 			expect(value.headers['redioactive-id']).toBe('1')
+			expect(value.headers['redioactive-previd']).toBe('1')
 			expect(value.headers['redioactive-nextid']).toBe('2')
+		})
+		test('Pull the end value', async () => {
+			const value = await got('http://localhost:8001/my/stream/id/4', { responseType: 'json' })
+			expect(value.body).toEqual({ end: true })
+			expect(value.headers['content-type']).toBe('application/json')
+			expect(value.headers['redioactive-id']).toBe('4')
+			expect(value.headers['redioactive-previd']).toBe('3')
+			expect(value.headers['redioactive-nextid']).toBe('4')
 		})
 		test('Get an empty manifest', async () => {
 			const manifest = await got('http://localhost:8001/my/stream/id/manifest.json', {
@@ -78,7 +120,6 @@ describe('Run a sequence of pull tests', () => {
 			})
 			expect(debug.body.tChestSize).toBe(4)
 			expect(debug.body.ended).toBe(true)
-			console.log(debug.body)
 		})
 		test('Pull the first value', async () => {
 			const value = await got(`http://localhost:${port}/my/stream/id/1`, { responseType: 'json' })
@@ -86,6 +127,14 @@ describe('Run a sequence of pull tests', () => {
 			expect(value.headers['content-type']).toBe('application/json')
 			expect(value.headers['redioactive-id']).toBe('1')
 			expect(value.headers['redioactive-nextid']).toBe('2')
+		})
+		test('Pull the end value', async () => {
+			const value = await got('http://localhost:8001/my/stream/id/4', { responseType: 'json' })
+			expect(value.body).toEqual({ end: true })
+			expect(value.headers['content-type']).toBe('application/json')
+			expect(value.headers['redioactive-id']).toBe('4')
+			expect(value.headers['redioactive-previd']).toBe('3')
+			expect(value.headers['redioactive-nextid']).toBe('4')
 		})
 		test('Get an empty manifest', async () => {
 			const manifest = await got(`http://localhost:${port}/my/stream/id/manifest.json`, {
@@ -125,7 +174,40 @@ describe('Run a sequence of pull tests', () => {
 			})
 			expect(debug.body.tChestSize).toBe(4)
 			expect(debug.body.ended).toBe(true)
-			console.log(debug.body)
+		})
+		test('Check start redirect', async () => {
+			const starter = await got<any>(`http://localhost:${port}/my/stream/id2/start`, {
+				followRedirect: false
+			})
+			expect(starter.headers['location']).toBeTruthy()
+			expect(starter.headers['location']).toMatch('http:')
+			expect(starter.headers['location']).toMatch(`:${port}`)
+			expect(starter.headers['location']).toMatch('/my/stream/id2')
+			expect(starter.headers['location']?.endsWith('/1')).toBe(true)
+
+			expect(starter.headers['redioactive-bodytype']).toBe('json')
+			expect(starter.headers['redioactive-idtype']).toBe('counter')
+			expect(starter.headers['redioactive-deltatype']).toBe('one')
+			expect(starter.headers['redioactice-cadence']).toBeUndefined()
+			expect(starter.headers['redioactive-buffersize']).toBe('10')
+			expect(starter.headers['content-length']).toBe('0')
+		})
+		test('Check latest redirect', async () => {
+			const latest = await got<any>(`http://localhost:${port}/my/stream/id2/latest`, {
+				followRedirect: false
+			})
+			expect(latest.headers['location']).toBeTruthy()
+			expect(latest.headers['location']).toMatch('http:')
+			expect(latest.headers['location']).toMatch(`:${port}`)
+			expect(latest.headers['location']).toMatch('/my/stream/id2')
+			expect(latest.headers['location']?.endsWith('/4')).toBe(true)
+
+			expect(latest.headers['redioactive-bodytype']).toBe('json')
+			expect(latest.headers['redioactive-idtype']).toBe('counter')
+			expect(latest.headers['redioactive-deltatype']).toBe('one')
+			expect(latest.headers['redioactice-cadence']).toBeUndefined()
+			expect(latest.headers['redioactive-buffersize']).toBe('10')
+			expect(latest.headers['content-length']).toBe('0')
 		})
 		test('Pull the first value', async () => {
 			const value = await got(`http://localhost:${port}/my/stream/id2/1`, { responseType: 'json' })
@@ -133,6 +215,14 @@ describe('Run a sequence of pull tests', () => {
 			expect(value.headers['content-type']).toBe('application/json')
 			expect(value.headers['redioactive-id']).toBe('1')
 			expect(value.headers['redioactive-nextid']).toBe('2')
+		})
+		test('Pull the end value', async () => {
+			const value = await got('http://localhost:8001/my/stream/id2/4', { responseType: 'json' })
+			expect(value.body).toEqual({ end: true })
+			expect(value.headers['content-type']).toBe('application/json')
+			expect(value.headers['redioactive-id']).toBe('4')
+			expect(value.headers['redioactive-previd']).toBe('3')
+			expect(value.headers['redioactive-nextid']).toBe('4')
 		})
 		test('Get an empty manifest', async () => {
 			const manifest = await got(`http://localhost:${port}/my/stream/id2/manifest.json`, {
@@ -176,7 +266,40 @@ describe('Run a sequence of pull tests', () => {
 			})
 			expect(debug.body.tChestSize).toBe(4)
 			expect(debug.body.ended).toBe(true)
-			console.log(debug.body)
+		})
+		test('Check start redirect', async () => {
+			const starter = await got<any>(`http://localhost:${port}/my/stream/id2/start`, {
+				followRedirect: false
+			})
+			expect(starter.headers['location']).toBeTruthy()
+			expect(starter.headers['location']).toMatch('http:')
+			expect(starter.headers['location']).toMatch(`:${port}`)
+			expect(starter.headers['location']).toMatch('/my/stream/id2')
+			expect(starter.headers['location']?.endsWith('/1')).toBe(true)
+
+			expect(starter.headers['redioactive-bodytype']).toBe('blob')
+			expect(starter.headers['redioactive-idtype']).toBe('counter')
+			expect(starter.headers['redioactive-deltatype']).toBe('one')
+			expect(starter.headers['redioactice-cadence']).toBeUndefined()
+			expect(starter.headers['redioactive-buffersize']).toBe('10')
+			expect(starter.headers['content-length']).toBe('0')
+		})
+		test('Check latest redirect', async () => {
+			const latest = await got<any>(`http://localhost:${port}/my/stream/id2/latest`, {
+				followRedirect: false
+			})
+			expect(latest.headers['location']).toBeTruthy()
+			expect(latest.headers['location']).toMatch('http:')
+			expect(latest.headers['location']).toMatch(`:${port}`)
+			expect(latest.headers['location']).toMatch('/my/stream/id2')
+			expect(latest.headers['location']?.endsWith('/4')).toBe(true)
+
+			expect(latest.headers['redioactive-bodytype']).toBe('blob')
+			expect(latest.headers['redioactive-idtype']).toBe('counter')
+			expect(latest.headers['redioactive-deltatype']).toBe('one')
+			expect(latest.headers['redioactice-cadence']).toBeUndefined()
+			expect(latest.headers['redioactive-buffersize']).toBe('10')
+			expect(latest.headers['content-length']).toBe('0')
 		})
 		test('Pull the first value', async () => {
 			const value = await got(`http://localhost:${port}/my/stream/id2/1`, {
@@ -190,6 +313,16 @@ describe('Run a sequence of pull tests', () => {
 			const redioDetails = value.headers['redioactive-details']
 			const redioDetails2 = Array.isArray(redioDetails) ? redioDetails[0] : redioDetails
 			expect(JSON.parse(redioDetails2 || '')).toEqual({ one: 1 })
+		})
+		test('Pull the end value', async () => {
+			const value = await got('http://localhost:8001/my/stream/id2/4', { responseType: 'buffer' })
+			expect(value.headers['redioactive-details']).toEqual(JSON.stringify({ end: true }))
+			expect(value.headers['content-type']).toBe('application/octet-stream')
+			expect(value.headers['content-length']).toBe('0')
+			expect(value.headers['redioactive-id']).toBe('4')
+			expect(value.headers['redioactive-previd']).toBe('3')
+			expect(value.headers['redioactive-nextid']).toBe('4')
+			expect(value.body.length).toBe(0)
 		})
 		test('Get an empty manifest', async () => {
 			const manifest = await got(`http://localhost:${port}/my/stream/id2/manifest.json`, {

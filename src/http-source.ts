@@ -16,6 +16,7 @@ interface BagOf<T> {
 	counter: number
 	id: number | string
 	nextId: string | number
+	prevId: string | number
 	nextFn: () => void
 	errorFn: (reason?: any) => void
 }
@@ -71,9 +72,9 @@ interface PushInfo extends ConInfo {
 	type: 'push'
 }
 
-function wait(t: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, t))
-}
+// function wait(t: number): Promise<void> {
+// 	return new Promise((resolve) => setTimeout(resolve, t))
+// }
 
 function noMatch(req: IncomingMessage, res: ServerResponse) {
 	if (res.writableEnded) return
@@ -165,8 +166,6 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			serverS,
 			root
 		})
-
-		console.log(info, streamIDs)
 	}
 
 	let fuzzyGap: number = (options && options.fuzzy) || 0.0
@@ -179,37 +178,43 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 		if (exact || fuzzFactor === 0.0) {
 			return exact
 		} else {
-			const keys = tChest.keys()
-			if (info.idType !== IdType.string) {
-				const gap = fuzzyGap * fuzzFactor
-				const idn = +id
-				const [min, max] = [idn - gap, idn + gap]
-				for (const key of keys) {
-					const keyn = +key
-					if (keyn > min && keyn < max) {
-						return tChest.get(key)
-					}
+			const key = fuzzyIDMatch(id, tChest.keys())
+			return key ? tChest.get(key) : undefined
+		}
+	}
+
+	function fuzzyIDMatch(id: string, keys: IterableIterator<string>): string | undefined {
+		if (info.idType !== IdType.string) {
+			const gap = fuzzyGap * fuzzFactor
+			const idn = +id
+			const [min, max] = [idn - gap, idn + gap]
+			for (const key of keys) {
+				const keyn = +key
+				if (keyn > min && keyn < max) {
+					return key
 				}
-				return undefined
-			} else {
-				// IdType === string
-				for (const key of keys) {
-					let score = id.length > key.length ? id.length - key.length : key.length - id.length
-					for (let x = id.length - 1; x >= 0 && score / id.length <= fuzzFactor; x--) {
-						if (x < key.length) {
-							score += key[x] === id[x] ? 0 : 1
-						}
-					}
-					if (score / id.length <= fuzzFactor) {
-						return tChest.get(key)
-					}
-				}
-				return undefined
 			}
+			return undefined
+		} else {
+			// IdType === string
+			for (const key of keys) {
+				let score = id.length > key.length ? id.length - key.length : key.length - id.length
+				for (let x = id.length - 1; x >= 0 && score / id.length <= fuzzFactor; x--) {
+					if (x < key.length) {
+						score += key[x] === id[x] ? 0 : 1
+					}
+				}
+				if (score / id.length <= fuzzFactor) {
+					return key
+				}
+			}
+			return undefined
 		}
 	}
 
 	const blobContentType = (options && options.contentType) || 'application/octet-stream'
+	const pendings: Array<(value?: void | PromiseLike<void> | undefined) => void> = []
+	let nextId: number | string
 	function pullRequest(req: IncomingMessage, res: ServerResponse) {
 		if (res.writableEnded) return
 		if (req.url && isPull(info) && req.method === 'GET') {
@@ -230,20 +235,33 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					return
 				}
 				if (id === 'end') {
-					return endStream(res)
+					return endStream(req, res)
 				}
-				if (id.startsWith('start')) {
-					// initialize stream and redirect to first available
+				if (id.match(/start|latest/)) {
+					res.statusCode = 302
+					const isSSL = Object.prototype.hasOwnProperty.call(req.socket, 'encrypted')
+					res.setHeader(
+						'Location',
+						`${isSSL ? 'https' : 'http'}://${req.headers['host']}${info.root}/${
+							id === 'start' ? lowWaterMark : highWaterMark
+						}`
+					)
+					res.setHeader('Redioactive-BodyType', info.body)
+					res.setHeader('Redioactive-IdType', info.idType)
+					res.setHeader('Redioactive-DeltaType', info.delta)
+					res.setHeader('Redioactive-BufferSize', `${bufferSize}`)
+					if (options && options.cadence) {
+						res.setHeader('Redioactive-Cadence', `${options.cadence}`)
+					}
+					res.end()
 					return
-				}
-				if (id.startsWith('latest')) {
-					// for live streams - get the latest
 				}
 
 				const value = fuzzyMatch(id)
 				if (value) {
 					res.setHeader('Redioactive-Id', value.id)
 					res.setHeader('Redioactive-NextId', value.nextId)
+					res.setHeader('Redioactive-PrevId', value.prevId)
 					// TODO parts and parallel
 					if (info.body !== BodyType.blob) {
 						const json = JSON.stringify(value.value)
@@ -258,13 +276,22 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 						res.end(value.blob || Buffer.alloc(0))
 					}
 
-					res.on('finish', () => {
-						// Relying on undocument features of promises that you can safely resolve twice
-						value.nextFn()
-					})
+					//res.on('finish', () => { - commented out to go parrallel - might work?
+					// Relying on undocument features of promises that you can safely resolve twice
+					setImmediate(value.nextFn)
+					//})
 					return
 				} else {
-					// TODO (fuzzy matches) next - delay response
+					if (fuzzyIDMatch(id, [nextId.toString()][Symbol.iterator]())) {
+						const pending = new Promise<void>((resolve) => {
+							pendings.push(resolve)
+							setTimeout(resolve, (options && options.timeout) || 5000)
+						})
+						pending.then(() => {
+							pullRequest(req, res)
+						})
+						return
+					}
 					let [status, message] = [404, '']
 					switch (info.idType) {
 						case IdType.counter:
@@ -273,7 +300,12 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 								status = 410 // Gone
 								message = `Request for value with sequence identifier "${id}" that is before the current low water mark of "${lowWaterMark}".`
 							} else if (+id > highWaterMark) {
-								message = `Request for value with sequence identifier "${id}" that is beyind the current high water mark of "${highWaterMark}".`
+								if (!ended) {
+									message = `Request for value with sequence identifier "${id}" that is beyond the current high water mark of "${highWaterMark}".`
+								} else {
+									status = 405 // METHOD NOT ALLOWED - I understand your request, but never for this resource pal!
+									message = `Request for a value with a sequence identifier "${id}" that beyond the end of a finished stream.`
+								}
 							} else {
 								message = `Unmatched in-range request for a value with a sequence identifier "${id}".`
 							}
@@ -321,14 +353,19 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 		res.end(debugString, 'utf8')
 	}
 
-	function endStream(res: ServerResponse) {
+	function endStream(req: IncomingMessage, res: ServerResponse) {
+		const isSSL = Object.prototype.hasOwnProperty.call(req.socket, 'encrypted')
+		const port = req.socket.localPort
 		if (isPull(info)) {
 			try {
 				info.server &&
 					info.server.close(() => {
 						isPull(info) && delete streamIDs[info.root]
-						isPull(info) &&
-							console.log(`Server on port ${info.server?.address()} closed.`, streamIDs)
+						console.log(
+							`Redioactive: HTTP/S pull source: ${
+								isSSL ? 'HTTPS' : 'HTTP'
+							} server on port ${port} closed.`
+						)
 					})
 				res.setHeader('Content-Type', 'application/json')
 				res.setHeader('Content-Length', 2)
@@ -466,23 +503,32 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			const tr: Record<string, unknown> = t as Record<string, unknown>
 			const currentId =
 				info.idType === IdType.counter ? idCounter : <number | string>tr[<string>options.seqId]
-			if (idCounter === 0) {
+			if (idCounter === 1) {
 				lowWaterMark = currentId
+				highWaterMark = currentId
 			}
-			let nextId: string | number
-			switch (info.delta) {
-				case DeltaType.one:
-					nextId = <number>currentId + 1
-					break
-				case DeltaType.fixed:
-					nextId = <number>currentId + <number>options.delta
-					break
-				case DeltaType.variable:
-					nextId = <number>currentId + <number>tr[<string>options.delta]
-					break
-				case DeltaType.string:
-					nextId = <string>tr[<string>options.delta]
-					break
+			while (pendings.length > 0) {
+				const resolvePending = pendings.pop()
+				resolvePending && setImmediate(resolvePending)
+			}
+			if (!isEnd(t)) {
+				switch (info.delta) {
+					case DeltaType.one:
+						nextId = <number>currentId + 1
+						break
+					case DeltaType.fixed:
+						nextId = <number>currentId + <number>options.delta
+						break
+					case DeltaType.variable:
+						nextId = <number>currentId + <number>tr[<string>options.delta]
+						break
+					case DeltaType.string:
+						nextId = <string>tr[<string>options.delta]
+						break
+				}
+			} else {
+				nextId = currentId
+				ended = true
 			}
 			const value = info.body === BodyType.primitive ? t : Object.assign({}, t)
 			if (typeof value === 'object') {
@@ -512,6 +558,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					counter: idCounter,
 					id: currentId,
 					nextId: nextId,
+					prevId: highWaterMark,
 					nextFn: resolve,
 					errorFn: reject
 				})
@@ -531,14 +578,5 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			) {
 				setImmediate(resolve)
 			}
-			if (isEnd(t)) {
-				ended = true
-			}
-			if (ended && isPull(info)) {
-				setTimeout(() => {
-					isPull(info) && info.server && info.server.close()
-				}, 10000)
-			}
-			return wait(1000)
 		})
 }
