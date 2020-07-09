@@ -129,10 +129,12 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			}
 			server = servers[options.httpPort]
 			if (!server) {
-				server = createServer()
+				server = options.serverOptions ? createServer(options.serverOptions) : createServer()
 				servers[options.httpPort] = server
 				server.listen(options.httpPort, () => {
-					console.log(`Server for uri listening on ${options.httpPort}`)
+					console.log(
+						`Redioactive: HTTP/S source: HTTP server for stream ${root} listening on ${options.httpPort}`
+					)
 				})
 			}
 			server.on('request', pullRequest)
@@ -147,9 +149,19 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			}
 			serverS = serversS[options.httpsPort]
 			if (!serverS) {
-				serverS = createServerS()
+				serverS = options.serverOptions ? createServerS(options.serverOptions) : createServerS()
 				serversS[options.httpsPort] = serverS
+				serverS.listen(options.httpsPort, () => {
+					console.log(
+						`Redioactive: HTTP/S source: HTTPS server for stream ${root} listening on ${options.httpsPort}`
+					)
+				})
 			}
+			serverS.on('request', pullRequest)
+			serverS.on('error', (err) => {
+				// TODO interrupt and push error?
+				console.error(err)
+			})
 		}
 
 		info = literal<PullInfo>({
@@ -284,8 +296,11 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 				} else {
 					if (fuzzyIDMatch(id, [nextId.toString()][Symbol.iterator]())) {
 						const pending = new Promise<void>((resolve) => {
-							pendings.push(resolve)
-							setTimeout(resolve, (options && options.timeout) || 5000)
+							const clearer = setTimeout(resolve, (options && options.timeout) || 5000)
+							pendings.push(() => {
+								clearTimeout(clearer)
+								resolve()
+							})
 						})
 						pending.then(() => {
 							pullRequest(req, res)
@@ -297,14 +312,19 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 						case IdType.counter:
 						case IdType.number:
 							if (+id < lowWaterMark) {
-								status = 410 // Gone
-								message = `Request for value with sequence identifier "${id}" that is before the current low water mark of "${lowWaterMark}".`
+								if (+id < lowestOfTheLow) {
+									status = 405
+									message = `Request for a value with a sequence identifier "${id}" that is before the start of a stream "${lowestOfTheLow}".`
+								} else {
+									status = 410 // Gone
+									message = `Request for value with sequence identifier "${id}" that is before the current low water mark of "${lowWaterMark}".`
+								}
 							} else if (+id > highWaterMark) {
 								if (!ended) {
 									message = `Request for value with sequence identifier "${id}" that is beyond the current high water mark of "${highWaterMark}".`
 								} else {
 									status = 405 // METHOD NOT ALLOWED - I understand your request, but never for this resource pal!
-									message = `Request for a value with a sequence identifier "${id}" that beyond the end of a finished stream.`
+									message = `Request for a value with a sequence identifier "${id}" that is beyond the end of a finished stream.`
 								}
 							} else {
 								message = `Unmatched in-range request for a value with a sequence identifier "${id}".`
@@ -362,9 +382,18 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					info.server.close(() => {
 						isPull(info) && delete streamIDs[info.root]
 						console.log(
-							`Redioactive: HTTP/S pull source: ${
-								isSSL ? 'HTTPS' : 'HTTP'
-							} server on port ${port} closed.`
+							`Redioactive: HTTP/S source: ${isSSL ? 'HTTPS' : 'HTTP'} server for stream ${
+								(isPull(info) && info.root) || 'unknown'
+							} on port ${port} closed.`
+						)
+					})
+				info.serverS &&
+					info.serverS.close(() => {
+						isPull(info) && delete streamIDs[info.root]
+						console.log(
+							`Redioactive: HTTP/S source: ${isSSL ? 'HTTPS' : 'HTTP'} server for stream ${
+								(isPull(info) && info.root) || 'unknown'
+							} on port ${port} closed.`
 						)
 					})
 				res.setHeader('Content-Type', 'application/json')
@@ -373,10 +402,14 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 				delete streamIDs[info.root]
 				if (
 					!Object.values(streamIDs).some(
-						(x) => isPull(info) && x.httpPort && x.httpPort === info.httpPort
+						(x) =>
+							isPull(info) &&
+							((x.httpPort && x.httpPort === info.httpPort) ||
+								(x.httpsPort && x.httpsPort === info.httpsPort))
 					)
 				) {
 					isPull(info) && info.httpPort && delete servers[info.httpPort]
+					isPull(info) && info.httpsPort && delete serversS[info.httpsPort]
 				}
 			} catch (err) {
 				console.error(
@@ -480,6 +513,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 	const bufferSize = (options && options.bufferSizeMax) || 10
 	let highWaterMark: string | number = 0
 	let lowWaterMark: string | number = 0
+	let lowestOfTheLow: string | number = 0
 	return async (t: Liquid<T>): Promise<void> =>
 		new Promise((resolve, reject) => {
 			if (isNil(t) || isError(t)) {
@@ -506,6 +540,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			if (idCounter === 1) {
 				lowWaterMark = currentId
 				highWaterMark = currentId
+				lowestOfTheLow = currentId
 			}
 			while (pendings.length > 0) {
 				const resolvePending = pendings.pop()
@@ -576,7 +611,12 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 				tChest.size < bufferSize || // build the initial buffer
 				(options && options.backPressure === false)
 			) {
-				setImmediate(resolve)
+				const timeout = (options && options.cadence) || 0
+				if (timeout) {
+					setTimeout(resolve, timeout)
+				} else {
+					setImmediate(resolve)
+				}
 			}
 		})
 }

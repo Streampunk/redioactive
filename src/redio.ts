@@ -15,6 +15,7 @@ import { URL } from 'url'
 import { httpSource } from './http-source'
 import { Readable } from 'stream'
 import { ReadStream } from 'fs'
+import { ServerOptions } from 'https'
 const { isPromise } = types
 
 /** Type of a value sent down a stream to indicate that it has ended. No values
@@ -255,6 +256,10 @@ export interface HTTPOptions extends RedioOptions {
 	httpPort?: number
 	/** HTTPS port to use for pull or push. Default is 8766. Set to `-1` to disable.  */
 	httpsPort?: number
+	/** Options required to create an HTTP/S server. For HTTPS, include the `key and
+	 *  `cert` properties.
+	 */
+	serverOptions?: ServerOptions
 	/** Append the first value of the named property of type `T` to complete the stream
 	 *  root path, e.g. if the URI contains `/fred/ginger` and the property of `T` called
 	 *  _extraStreamRoot_ has value `streamId` with value `audio/channel3`, the full stream
