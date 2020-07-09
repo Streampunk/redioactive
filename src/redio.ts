@@ -16,6 +16,7 @@ import { httpSource } from './http-source'
 import { Readable } from 'stream'
 import { ReadStream } from 'fs'
 import { ServerOptions } from 'https'
+import { httpTarget } from './http-target'
 const { isPromise } = types
 
 /** Type of a value sent down a stream to indicate that it has ended. No values
@@ -1302,17 +1303,6 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 	}
 }
 
-// let counter = 0
-// let test = new RedioStart<number>(() => new Promise((resolve) => setTimeout(() => resolve(counter++), Math.random() * 1000)))
-//
-// test.sink((t: number | RedioEnd) => new Promise((resolve) => {
-// 	console.log('Starting to process slow coach', t)
-// 	setTimeout(() => {
-// 		console.log('Ending the slow coach', t)
-// 		resolve()
-// 	}, 750)
-// }))
-
 function isReadableStream(x: any): x is Readable {
 	return (
 		x !== null &&
@@ -1380,7 +1370,7 @@ export default function <T>(data: Array<T | RedioNil>, options?: RedioOptions): 
  * @typeparam T   Type of values in the stream.
  * @return Stream of values received-as-pulled from the remote stream processor.
  */
-export default function <T>(url: string, options?: RedioOptions): RedioPipe<T>
+export default function <T>(url: string, options?: HTTPOptions): RedioPipe<T>
 /**
  *  Create a stream of values of type `T` using a [[Funnel]] function, a _thunk_
  *  that is called every time the stream requires a new value. The _thunk_ maybe
@@ -1400,6 +1390,13 @@ export default function <T>(
 	args2?: RedioOptions | StreamOptions | HTTPOptions | string,
 	_args3?: RedioOptions
 ): RedioPipe<T> | null {
+	if (typeof args1 === 'string') {
+		// HTTP funnel
+		return new RedioStart(
+			httpTarget<T>(args1, args2 as HTTPOptions | undefined),
+			args2 as RedioOptions
+		)
+	}
 	if (typeof args1 === 'function') {
 		if (args1.length === 0) {
 			// Function is Funnel<T>

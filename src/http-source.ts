@@ -3,6 +3,7 @@ import { Server, createServer, IncomingMessage, ServerResponse, STATUS_CODES } f
 import { Server as ServerS, createServer as createServerS } from 'https'
 import { isError } from 'util'
 import { URL } from 'url'
+import { ProtocolType, BodyType, IdType, DeltaType } from './http-common'
 
 /* Code for sending values over HTTP/S. */
 
@@ -19,31 +20,6 @@ interface BagOf<T> {
 	prevId: string | number
 	nextFn: () => void
 	errorFn: (reason?: any) => void
-}
-
-enum ProtocolType {
-	http = 'http',
-	https = 'https',
-	both = 'both'
-}
-
-enum BodyType {
-	primitive = 'primitive',
-	json = 'json',
-	blob = 'blob'
-}
-
-enum IdType {
-	counter = 'counter',
-	number = 'number',
-	string = 'string'
-}
-
-enum DeltaType {
-	one = 'one',
-	fixed = 'fixed', // increment defined in options
-	variable = 'variable', // variable increment defined in the stream
-	string = 'string' // fixed name of next element
 }
 
 interface ConInfo {

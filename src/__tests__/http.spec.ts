@@ -7,7 +7,7 @@ function wait(t: number): Promise<void> {
 	})
 }
 
-describe('Run a sequence of pull tests', () => {
+describe.skip('Run a sequence of pull tests', () => {
 	wait(1)
 	describe('Set up a simple http pull stream of number', () => {
 		beforeAll(async () => {
@@ -336,5 +336,25 @@ describe('Run a sequence of pull tests', () => {
 			await got(`http://localhost:${port}/my/stream/id2/end`)
 			await wait(500)
 		})
+	})
+})
+
+describe('Receive a stream', () => {
+	const port = 8001
+	beforeAll(async () => {
+		redio([1, 2, 3]).http('/my/stream/id', {
+			httpPort: port,
+			manifest: { wibble: true, wobble: 'false' }
+		})
+		// await wait(500)
+	})
+	test('Create a redio HTTP stream consumer', async () => {
+		await expect(
+			redio<number>(`http://localhost:${port}/my/stream/id`, { httpPort: 8001 }).toArray()
+		).resolves.toEqual([1, 2, 3])
+	})
+	afterAll(async () => {
+		await got(`http://localhost:${port}/my/stream/id/end`)
+		await wait(500)
 	})
 })
