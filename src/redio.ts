@@ -345,6 +345,22 @@ interface StreamOptions extends RedioOptions {
 	/** Encoding to set to convert buffers to strings. Leave unset for buffers. */
 	encoding?: string
 }
+
+/**
+ * Options sepcific to streams made from
+ * [Node.JS event emitters](https://nodejs.org/docs/latest-v12.x/api/events.html).
+ */
+interface EventOptions extends RedioOptions {
+	/** Name of an event emitted when an event emitter has ended, e.g. `finish`, `close` or
+	 *  `end`. Defaults to `end` - which might result in a stream never ending!
+	 */
+	endEvent?: string
+	/** Name of an event emitted when an error occurs, e.g. `error`. Errors are sent
+	 *  on down the pipe. Defaults to `error`.
+	 */
+	errorEvent?: string
+}
+
 /**
  *  Reactive streams pipeline carrying liquid of a particular type.
  *  @typeparam T Type of liquid travelling down the pipe.
@@ -1339,7 +1355,7 @@ export default function <T>(iterable: Iterable<T>, options?: RedioOptions): Redi
  */
 export default function <T>(generator: Generator<T>, options?: RedioOptions): RedioPipe<T>
 /**
- * Create a stream from a [Node.JS Readable stream](https://nodejs.org/docs/latest-v12.x/api/stream.html#stream_readable_streams).
+ * Create a stream from a [Node.js Readable stream](https://nodejs.org/docs/latest-v12.x/api/stream.html#stream_readable_streams).
  * Back pressure will be applied as required, slowing stream reading down to the acceptable
  * rate. Use the `chunkSize` options to requests a specific size of chunk and `encoding` to
  * specify a string encoding.
@@ -1349,7 +1365,21 @@ export default function <T>(generator: Generator<T>, options?: RedioOptions): Re
  * @return Stream of values created by consuming a Node.JS stream.
  */
 export default function <T>(stream: Readable | ReadStream, options?: StreamOptions): RedioPipe<T>
-// export default function<T> (e: EventEmitter, eventName: string, options?: RedioOptions): RedioPipe<T>
+/**
+ * Create a stream from a [Node.js event emitter](https://nodejs.org/docs/latest-v12.x/api/events.html)
+ * for a specific event name. So that the stream can eventually end, either the event emitter stops
+ * emitting events of the named type after an `end` event or that given by options `endEvent`.
+ * @param emitter   Event emitter to use to create a stream from.
+ * @param eventName Name of the events to listen for and push onto the stream.
+ * @param options   Optional configuration, including [[EventOptions|event details]].
+ * @typeparam T     Type of values emitted by the first emitted argument.
+ * @return Stream of values created as events of the given name are omitted.
+ */
+export default function <T>(
+	emitter: EventEmitter,
+	eventName: string,
+	options?: EventOptions
+): RedioPipe<T>
 /**
  *  Create a stream of values from the given array.
  *  @param data    Array of data to use to create a stream.
@@ -1388,7 +1418,7 @@ export default function <T>(funnel: Funnel<T>, options?: RedioOptions): RedioPip
 export default function <T>(
 	args1: Funnel<T> | string | Array<T> | EventEmitter | Readable | Generator<T> | Iterable<T>,
 	args2?: RedioOptions | StreamOptions | HTTPOptions | string,
-	_args3?: RedioOptions
+	args3?: EventOptions
 ): RedioPipe<T> | null {
 	if (typeof args1 === 'string') {
 		// HTTP funnel
@@ -1506,6 +1536,42 @@ export default function <T>(
 			})
 		}
 		return new RedioStart<T>(strGenny, options)
+	}
+	if (args1 instanceof EventEmitter) {
+		const options: EventOptions | undefined = args3 as EventOptions | undefined
+		const eventName = <string>args2
+		const endName = (options && options.endEvent) || 'end'
+		const errorName = (options && options.errorEvent) || 'error'
+		let ended = false
+		args1.on(endName, () => {
+			ended = true
+		})
+		const funnel: Funnel<T> = () =>
+			new Promise<T | RedioEnd>((resolve, reject) => {
+				if (ended) {
+					resolve(end)
+					return
+				}
+				const resolver = (x: any) => {
+					args1.removeListener(errorName, rejector)
+					args1.removeListener(endName, ender)
+					resolve(x)
+				}
+				const rejector = (err: any) => {
+					args1.removeListener(eventName, resolver)
+					args1.removeListener(endName, ender)
+					reject(err)
+				}
+				const ender = () => {
+					args1.removeListener(errorName, rejector)
+					args1.removeListener(eventName, resolver)
+					resolve(end)
+				}
+				args1.prependOnceListener(eventName, resolver)
+				args1.once(errorName, rejector)
+				args1.once(endName, ender)
+			})
+		return new RedioStart(funnel, options)
 	}
 	return null
 }

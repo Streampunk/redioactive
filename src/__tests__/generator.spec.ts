@@ -1,5 +1,6 @@
 import { default as redio, Liquid, end, Funnel, Generator, RedioEnd, nil } from '../redio'
 import fs from 'fs'
+import { EventEmitter } from 'events'
 
 describe('Generate a stream by sync thunk', () => {
 	const gen = (x: number) => {
@@ -146,5 +147,32 @@ describe('Generator from readable', () => {
 		await expect(
 			redio(fs.createReadStream('src/__tests__/generator.spec.ts'), { encoding: 'utf8' }).toArray()
 		).resolves.toEqual(expect.arrayContaining([expect.stringMatching('imp(o)rt')]))
+	})
+})
+
+class EventMaker extends EventEmitter {
+	constructor() {
+		super()
+	}
+	makeOne(name: string, value: string) {
+		this.emit(name, value)
+	}
+	makeOneIn(name: string, value: string, wait: number) {
+		setTimeout(() => {
+			this.emit(name, value)
+		}, wait)
+	}
+}
+
+describe('Generator from events', () => {
+	const emitter = new EventMaker()
+	test('Catch an event', async () => {
+		const stream = redio<string>(emitter, 'change').toArray()
+		setImmediate(() => {
+			emitter.makeOne('change', 'fred')
+			emitter.makeOne('change', 'ginger')
+			emitter.makeOneIn('end', '', 50)
+		})
+		await expect(stream).resolves.toEqual(['fred', 'ginger'])
 	})
 })
