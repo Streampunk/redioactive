@@ -166,13 +166,12 @@ class EventMaker extends EventEmitter {
 
 describe('Generator from events', () => {
 	const emitter = new EventMaker()
+	emitter.on('change', (x) => console.log('debuggy', x))
 	test('Catch an event', async () => {
 		const stream = redio<string>(emitter, 'change').toArray()
-		setImmediate(() => {
-			emitter.makeOne('change', 'fred')
-			emitter.makeOne('change', 'ginger')
-			emitter.makeOneIn('end', '', 50)
-		})
+		emitter.makeOneIn('change', 'fred', 1)
+		emitter.makeOneIn('change', 'ginger', 2)
+		emitter.makeOneIn('end', '', 3)
 		await expect(stream).resolves.toEqual(['fred', 'ginger'])
 	})
 })
