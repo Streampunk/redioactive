@@ -174,6 +174,11 @@ This is a self-documenting API. Fire up your IDE and hover over the method descr
 
 #### Creating a stream
 
+The default exported function of redioactive can be used to create streams from common kinds of stream source in Node.js, including Iterables, Streams and Event Emitters.
+
+```typescript
+```
+
 #### Ending a stream
 
 #### One-to-many

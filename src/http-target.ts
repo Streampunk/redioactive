@@ -119,10 +119,10 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 			res.on('data', (chunk: string) => {
 				manifestStr += chunk
 			})
-			console.log('Getting manifest response')
+			// console.log('Getting manifest response', res.headers['content-length'])
 			res.on('end', () => {
 				info.manifest = JSON.parse(manifestStr)
-				console.log('Ending with a manifest', info.manifest, manifestStr)
+				// console.log('Ending with a manifest', info.manifest, manifestStr)
 				manifestly = true
 				if (starter) {
 					initDone()
@@ -145,40 +145,96 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 			// 5. Get ready for the next pull or detect end
 			// 6. resolve
 			initialized.then(() => {
-				console.log('From the funnel', streamCounter, info.manifest, nextId)
+				// console.log('From the funnel', streamCounter, info.manifest, nextId)
 				const valueReq = http.request(
 					{
 						hostname: url.hostname,
 						protocol: url.protocol,
 						port: url.port,
-						path: `${info.root}/${currentId.toString()}`,
+						path: `${info.root}/${nextId.toString()}`,
 						method: 'GET'
 					},
 					(res) => {
-						// TODO check status
-						let valueStr = ''
+						if (res.statusCode !== 200) {
+							throw new Error(
+								`Redioactive: HTTP/S target: Unexpected response code ${res.statusCode}.`
+							)
+						}
+						currentId = nextId
+						if (!res.headers['content-length']) {
+							throw new Error('Redioactive: HTTP/S target: Content-Length header expected')
+						}
+						const value =
+							info.body === BodyType.blob ? Buffer.allocUnsafe(+res.headers['content-length']) : ''
 						const streamSaysNextIs = res.headers['redioactive-nextid']
-						currentId = Array.isArray(streamSaysNextIs)
+						nextId = Array.isArray(streamSaysNextIs)
 							? +streamSaysNextIs[0]
 							: streamSaysNextIs
 							? +streamSaysNextIs
 							: currentId
-						res.setEncoding('utf8')
-						res.on('data', (chunk: string) => {
-							valueStr += chunk
-						})
-						res.on('end', () => {
-							const value = JSON.parse(valueStr)
-							if (
-								typeof value === 'object' &&
-								Object.keys(value).length === 1 &&
-								value.end === true
-							) {
-								resolve(end)
+						if (info.body !== BodyType.blob) {
+							res.setEncoding('utf8')
+						}
+						let bufferPos = 0
+						res.on('data', (chunk: string | Buffer) => {
+							if (info.body === BodyType.blob) {
+								bufferPos += (<Buffer>chunk).copy(<Buffer>value, bufferPos)
 							} else {
-								resolve(value)
+								;(<string>value) += <string>chunk
 							}
 						})
+						res.on('end', () => {
+							let t: T
+							if (info.body === BodyType.blob) {
+								const s = <Record<string, unknown>>{}
+								if (value.length > 0) {
+									s[(options && options.blob) || 'blob'] = value
+								}
+								let details = res.headers['redioactive-details'] || '{}'
+								if (Array.isArray(details)) {
+									details = details[0]
+								}
+								t = <T>Object.assign(s, JSON.parse(details))
+							} else {
+								t = <T>JSON.parse(<string>value)
+							}
+							if (typeof t === 'object') {
+								if (
+									Object.keys(t).length === 1 &&
+									Object.prototype.hasOwnProperty.call(t, 'end') &&
+									(<Record<string, unknown>>t)['end'] === true
+								) {
+									resolve(end)
+									return
+								}
+								if (options && typeof options.manifest === 'string') {
+									;(<Record<string, unknown>>t)[options.manifest] = info.manifest
+								}
+								if (options && options.seqId) {
+									;(<Record<string, unknown>>t)[options.seqId] = currentId
+								}
+								if (options && options.debug) {
+									;(<Record<string, unknown>>t)['debug_streamCounter'] = streamCounter
+									;(<Record<string, unknown>>t)['debug_status'] = res.statusCode
+								}
+								if (options && typeof options.delta === 'string') {
+									switch (info.delta) {
+										case DeltaType.one:
+											;(<Record<string, unknown>>t)[options.delta] = 1
+											break
+										case DeltaType.variable:
+										case DeltaType.fixed:
+											;(<Record<string, unknown>>t)[options.delta] =
+												<number>nextId - <number>currentId
+											break
+										default:
+											break
+									}
+								}
+							}
+							resolve(t)
+						})
+						res.on('error', reject)
 					}
 				)
 				valueReq.on('error', reject)

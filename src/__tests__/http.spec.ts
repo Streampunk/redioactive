@@ -339,22 +339,108 @@ describe.skip('Run a sequence of pull tests', () => {
 	})
 })
 
-describe('Receive a stream', () => {
+describe('Receive a stream of primitive', () => {
 	const port = 8001
-	beforeAll(async () => {
-		redio([1, 2, 3]).http('/my/stream/id', {
-			httpPort: port,
-			manifest: { wibble: true, wobble: 'false' }
+	describe('Receive a stream of primitive values', () => {
+		beforeAll(async () => {
+			redio([1, 2, 3]).http('/my/stream/id', {
+				httpPort: port,
+				manifest: { wibble: true, wobble: 'false' }
+			})
+			// await wait(500)
 		})
-		// await wait(500)
+		test('Create a redio HTTP stream consumer', async () => {
+			await expect(
+				redio<number>(`http://localhost:${port}/my/stream/id`, { httpPort: 8001 }).toArray()
+			).resolves.toEqual([1, 2, 3])
+		})
+		afterAll(async () => {
+			await got(`http://localhost:${port}/my/stream/id/end`)
+			await wait(500)
+		})
 	})
-	test('Create a redio HTTP stream consumer', async () => {
-		await expect(
-			redio<number>(`http://localhost:${port}/my/stream/id`, { httpPort: 8001 }).toArray()
-		).resolves.toEqual([1, 2, 3])
+
+	describe('Receive a stream of JSON', () => {
+		beforeAll(async () => {
+			redio([{ one: 1 }, { two: 'two' }, { three: [1, 'plus', { two: true }] }]).http(
+				'/my/stream/id',
+				{
+					httpPort: port,
+					manifest: { wibble: true, wobble: 'false' }
+				}
+			)
+			// await wait(500)
+		})
+		test('Create a redio HTTP stream consumer', async () => {
+			await expect(
+				redio<number>(`http://localhost:${port}/my/stream/id`, {
+					httpPort: 8001
+				}).toArray()
+			).resolves.toEqual([{ one: 1 }, { two: 'two' }, { three: [1, 'plus', { two: true }] }])
+		})
+		afterAll(async () => {
+			await got(`http://localhost:${port}/my/stream/id/end`)
+			await wait(500)
+		})
 	})
-	afterAll(async () => {
-		await got(`http://localhost:${port}/my/stream/id/end`)
-		await wait(500)
+
+	describe('Receive a stream of blobs', () => {
+		beforeAll(async () => {
+			redio([
+				{ one: 1, data: Buffer.from([1, 1, 1]) },
+				{ two: 'two', data: Buffer.from([2, 2, 2]) },
+				{ three: [1, 'plus', { two: true }], data: Buffer.from([3, 3, 3]) }
+			]).http('/my/stream/id', {
+				httpPort: port,
+				manifest: { wibble: true, wobble: 'false' },
+				blob: 'data'
+			})
+			// await wait(500)
+		})
+		test('Create a redio HTTP stream consumer', async () => {
+			await expect(
+				redio<number>(`http://localhost:${port}/my/stream/id`, {
+					httpPort: 8001,
+					blob: 'dematerial'
+				}).toArray()
+			).resolves.toEqual([
+				{ one: 1, dematerial: Buffer.from([1, 1, 1]) },
+				{ two: 'two', dematerial: Buffer.from([2, 2, 2]) },
+				{ three: [1, 'plus', { two: true }], dematerial: Buffer.from([3, 3, 3]) }
+			])
+		})
+		afterAll(async () => {
+			await got(`http://localhost:${port}/my/stream/id/end`)
+			await wait(500)
+		})
+	})
+
+	describe('Receive a manifest', () => {
+		beforeAll(async () => {
+			redio([{ one: 1 }, { two: 'two' }, { three: [1, 'plus', { two: true }] }]).http(
+				'/my/stream/id',
+				{
+					httpPort: port,
+					manifest: { wibble: true, wobble: 'false' }
+				}
+			)
+			// await wait(500)
+		})
+		test('Create a redio HTTP stream consumer', async () => {
+			await expect(
+				redio<number>(`http://localhost:${port}/my/stream/id`, {
+					httpPort: 8001,
+					manifest: 'manifred'
+				}).toArray()
+			).resolves.toEqual([
+				{ one: 1, manifred: { wibble: true, wobble: 'false' } },
+				{ two: 'two', manifred: { wibble: true, wobble: 'false' } },
+				{ three: [1, 'plus', { two: true }], manifred: { wibble: true, wobble: 'false' } }
+			])
+		})
+		afterAll(async () => {
+			await got(`http://localhost:${port}/my/stream/id/end`)
+			await wait(500)
+		})
 	})
 })

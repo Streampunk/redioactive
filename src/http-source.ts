@@ -178,7 +178,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			const [min, max] = [idn - gap, idn + gap]
 			for (const key of keys) {
 				const keyn = +key
-				if (keyn > min && keyn < max) {
+				if (keyn >= min && keyn <= max) {
 					return key
 				}
 			}
@@ -270,7 +270,11 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					//})
 					return
 				} else {
+					for (const k of [nextId.toString()][Symbol.iterator]()) {
+						console.log('**** About to fuzzy match with nextId', k)
+					}
 					if (fuzzyIDMatch(id, [nextId.toString()][Symbol.iterator]())) {
+						console.log('*** Fuzzy match with next', id)
 						const pending = new Promise<void>((resolve) => {
 							const clearer = setTimeout(resolve, (options && options.timeout) || 5000)
 							pendings.push(() => {
@@ -281,6 +285,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 						pending.then(() => {
 							pullRequest(req, res)
 						})
+						tChest.get(highWaterMark.toString())?.nextFn()
 						return
 					}
 					let [status, message] = [404, '']
@@ -331,6 +336,10 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 	}
 
 	function debug(res: ServerResponse) {
+		const keys: Array<string> = []
+		for (const key of tChest.keys()) {
+			keys.push(key)
+		}
 		const debugInfo = {
 			info,
 			tChestSize: tChest.size,
@@ -341,8 +350,14 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			url,
 			streamIDs,
 			options,
-			ended
+			ended,
+			lowestOfTheLow,
+			lowWaterMark,
+			highWaterMark,
+			nextId,
+			keys
 		}
+
 		const debugString = JSON.stringify(debugInfo, null, 2)
 		res.setHeader('Content-Type', 'application/json')
 		res.setHeader('Content-Length', `${Buffer.byteLength(debugString, 'utf8')}`)
