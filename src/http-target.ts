@@ -2,6 +2,7 @@ import { HTTPOptions, Funnel, Liquid, literal, end } from './redio'
 import { ProtocolType, IdType, DeltaType, BodyType } from './http-common'
 import http from 'http'
 import { URL } from 'url'
+import { promises as dns } from 'dns'
 
 interface ConInfo {
 	type: 'push' | 'pull'
@@ -32,6 +33,7 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 			delta: DeltaType.one,
 			manifest: {}
 		})
+		dns.lookup(url.hostname)
 	} else {
 		info = literal<ConInfo>({
 			type: 'push',
@@ -57,81 +59,93 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 		initError = reject
 	})
 	let [starter, manifestly] = [false, false]
-	const startReq = http.request(
-		{
-			hostname: url.hostname,
-			protocol: url.protocol,
-			port: url.port,
-			path: `${info.root}/start`,
-			method: 'GET'
-		},
-		(res) => {
-			const location = res.headers['location']
-			if (res.statusCode !== 302 || location === undefined) {
-				throw new Error(
-					`Redioactive: HTTP/S target: Failed to retrieve stream start details for "${info.root}".`
-				)
+	dns
+		.lookup(url.hostname)
+		.then(
+			(host) => {
+				url.hostname = host.address
+			},
+			() => {
+				/* Does not matter - fall back on given hostname and default DNS behaviour */
 			}
-			res.on('error', initError)
-			currentId = location.slice(location.lastIndexOf('/') + 1)
-			nextId = currentId
-			let idType = res.headers['redioactive-idtype']
-			if (Array.isArray(idType)) {
-				idType = idType[0]
-			}
-			info.idType = <IdType>idType || IdType.counter
-			let delta = res.headers['redioactive-deltatype']
-			if (Array.isArray(delta)) {
-				delta = delta[0]
-			}
-			info.delta = <DeltaType>delta || DeltaType.one
-			let body = res.headers['redioactive-bodytype']
-			if (Array.isArray(body)) {
-				body = body[0]
-			}
-			info.body = <BodyType>body || BodyType.primitive
+		)
+		.then(() => {
+			const startReq = http.request(
+				{
+					hostname: url.hostname,
+					protocol: url.protocol,
+					port: url.port,
+					path: `${info.root}/start`,
+					method: 'GET'
+				},
+				(res) => {
+					const location = res.headers['location']
+					if (res.statusCode !== 302 || location === undefined) {
+						throw new Error(
+							`Redioactive: HTTP/S target: Failed to retrieve stream start details for "${info.root}".`
+						)
+					}
+					res.on('error', initError)
+					currentId = location.slice(location.lastIndexOf('/') + 1)
+					nextId = currentId
+					let idType = res.headers['redioactive-idtype']
+					if (Array.isArray(idType)) {
+						idType = idType[0]
+					}
+					info.idType = <IdType>idType || IdType.counter
+					let delta = res.headers['redioactive-deltatype']
+					if (Array.isArray(delta)) {
+						delta = delta[0]
+					}
+					info.delta = <DeltaType>delta || DeltaType.one
+					let body = res.headers['redioactive-bodytype']
+					if (Array.isArray(body)) {
+						body = body[0]
+					}
+					info.body = <BodyType>body || BodyType.primitive
 
-			starter = true
-			if (manifestly) {
-				initDone()
-			}
-		}
-	)
-	startReq.on('error', initError)
-	startReq.end()
-
-	const maniReq = http.request(
-		{
-			hostname: url.hostname,
-			protocol: url.protocol,
-			port: url.port,
-			path: `${info.root}/manifest.json`,
-			method: 'GET'
-		},
-		(res) => {
-			if (res.statusCode !== 200 || res.headers['content-type'] !== 'application/json') {
-				throw new Error(
-					`Redioactive: HTTP/S target: Failed to retrieve manifest for stream "${info.root}".`
-				)
-			}
-			res.setEncoding('utf8')
-			let manifestStr = ''
-			res.on('data', (chunk: string) => {
-				manifestStr += chunk
-			})
-			// console.log('Getting manifest response', res.headers['content-length'])
-			res.on('end', () => {
-				info.manifest = JSON.parse(manifestStr)
-				// console.log('Ending with a manifest', info.manifest, manifestStr)
-				manifestly = true
-				if (starter) {
-					initDone()
+					starter = true
+					if (manifestly) {
+						initDone()
+					}
 				}
-			})
-		}
-	)
-	maniReq.on('error', initError)
-	maniReq.end()
+			)
+			startReq.on('error', initError)
+			startReq.end()
+
+			const maniReq = http.request(
+				{
+					hostname: url.hostname,
+					protocol: url.protocol,
+					port: url.port,
+					path: `${info.root}/manifest.json`,
+					method: 'GET'
+				},
+				(res) => {
+					if (res.statusCode !== 200 || res.headers['content-type'] !== 'application/json') {
+						throw new Error(
+							`Redioactive: HTTP/S target: Failed to retrieve manifest for stream "${info.root}".`
+						)
+					}
+					res.setEncoding('utf8')
+					let manifestStr = ''
+					res.on('data', (chunk: string) => {
+						manifestStr += chunk
+					})
+					// console.log('Getting manifest response', res.headers['content-length'])
+					res.on('end', () => {
+						info.manifest = JSON.parse(manifestStr)
+						// console.log('Ending with a manifest', info.manifest, manifestStr)
+						manifestly = true
+						if (starter) {
+							initDone()
+						}
+					})
+				}
+			)
+			maniReq.on('error', initError)
+			maniReq.end()
+		})
 
 	// 1. Do all the initialization and options checks
 	// 2. Make the /start request and set up state

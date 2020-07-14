@@ -1,5 +1,8 @@
 import redio from '../redio'
 import got from 'got'
+// import http from 'http'
+// import { ServerResponse } from 'http'
+// import { IncomingMessage } from 'http'
 
 function wait(t: number): Promise<void> {
 	return new Promise<void>((resolve) => {
@@ -7,7 +10,7 @@ function wait(t: number): Promise<void> {
 	})
 }
 
-describe.skip('Run a sequence of pull tests', () => {
+describe('Run a sequence of pull tests', () => {
 	wait(1)
 	describe('Set up a simple http pull stream of number', () => {
 		beforeAll(async () => {
@@ -444,3 +447,48 @@ describe('Receive a stream of primitive', () => {
 		})
 	})
 })
+
+/* describe.only('POST order test', () => {
+	let server: http.Server
+	beforeAll(async () => {
+		return new Promise((resolve) => {
+			server = http.createServer()
+			server.listen(8765, () => {
+				console.log('Server listening on 8765')
+				resolve()
+			})
+		})
+	})
+	test('What order the POST', async () => {
+		server.on('request', (req: IncomingMessage, res: ServerResponse) => {
+			console.log(`Received request ${res.statusCode}, ${req.url}`)
+			req.on('data', c => { console.log(c.length) })
+			req.on('end', () => { 
+				console.log('Request read') 
+				res.end()
+			})
+			// res.end()
+		})
+		let req = http.request({
+			hostname: 'localhost',
+			port: 8765,
+			protocol: 'http:',
+			path: '/',
+			method: 'POST'
+		}, res => {
+			console.log(`Received response ${res.statusCode}`)
+			res.on('error', console.error)
+		})
+		console.log('Sending some bytes')
+		req.end(Buffer.alloc(6543210))
+		req.on('error', console.error)
+		req.on('finish', () => console.log('Request finished'))
+		req.on('end', () => console.log('Request ended'))
+	})
+	afterAll(async () => {
+		await wait(1000)
+		return new Promise((resolve) => {
+			server.close(resolve)
+		})
+	})
+}) */

@@ -1,9 +1,10 @@
 import { Spout, Liquid, HTTPOptions, literal, isNil, RedioEnd, isEnd } from './redio'
-import { Server, createServer, IncomingMessage, ServerResponse, STATUS_CODES } from 'http'
+import http, { Server, createServer, IncomingMessage, ServerResponse, STATUS_CODES } from 'http'
 import { Server as ServerS, createServer as createServerS } from 'https'
 import { isError } from 'util'
 import { URL } from 'url'
 import { ProtocolType, BodyType, IdType, DeltaType } from './http-common'
+import { promises as dns } from 'dns'
 
 /* Code for sending values over HTTP/S. */
 
@@ -29,6 +30,7 @@ interface ConInfo {
 	idType: IdType
 	delta: DeltaType
 	manifest: Record<string, unknown>
+	root: string
 }
 
 interface PullInfo extends ConInfo {
@@ -37,7 +39,6 @@ interface PullInfo extends ConInfo {
 	httpsPort?: number
 	server?: Server
 	serverS?: ServerS
-	root: string
 }
 
 function isPull(c: ConInfo): c is PullInfo {
@@ -46,6 +47,10 @@ function isPull(c: ConInfo): c is PullInfo {
 
 interface PushInfo extends ConInfo {
 	type: 'push'
+}
+
+function isPush(c: ConInfo): c is PushInfo {
+	return c.type === 'push'
 }
 
 // function wait(t: number): Promise<void> {
@@ -92,7 +97,8 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			body: BodyType.primitive,
 			idType: IdType.counter,
 			delta: DeltaType.one,
-			manifest: {}
+			manifest: {},
+			root: url.pathname
 		})
 	} else {
 		let server: Server | undefined = undefined
@@ -500,6 +506,127 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 	}
 
 	let idCounter = 0
+	function push(currentId: string | number) {
+		const manifestSender = new Promise<void>((resolve, reject) => {
+			if (idCounter !== lowestOfTheLow) {
+				resolve()
+				return
+			}
+			// First time out, send manifest
+			dns
+				.lookup(url.hostname)
+				.then(
+					(host) => {
+						url.hostname = host.address
+					},
+					() => {
+						/* Does not matter - fall back on given hostname and default DNS behaviour */
+					}
+				)
+				.then(() => {
+					const req = http.request(
+						{
+							hostname: url.hostname,
+							protocol: url.protocol,
+							port: url.port,
+							path: `${info.root}/manifest.json`,
+							method: 'POST',
+							headers: {
+								'Redioactive-BodyType': info.body,
+								'Redioactive-IdType': info.idType,
+								'Redioactive-DeltaType': info.delta,
+								'Redioactive-BufferSize': `${bufferSize}`
+							}
+						},
+						(res) => {
+							if (res.statusCode === 200) {
+								resolve()
+							} else {
+								reject(
+									new Error(`After posting manifest, unexptected respose code "${res.statusCode}"`)
+								)
+							}
+							res.on('error', reject)
+						}
+					)
+					if (options && options.cadence) {
+						req.setHeader('Redioactive-Cadence', `${options.cadence}`)
+					}
+					req.on('error', reject)
+					const maniJSON = JSON.stringify(info.manifest)
+					req.setHeader('Content-Length', `${Buffer.byteLength(maniJSON, 'utf8')}`)
+					req.setHeader('Content-Type', 'application/json')
+					req.end(maniJSON, 'utf8')
+				})
+		})
+		manifestSender
+			.then(
+				() =>
+					new Promise<void>((resolve, reject) => {
+						const sendBag = tChest.get(currentId.toString())
+						if (!sendBag) {
+							throw new Error('Redioactive: HTTP/S source: Could not find element to push.')
+						}
+						const req = http.request(
+							{
+								hostname: url.hostname,
+								protocol: url.protocol,
+								port: url.port,
+								path: `${info.root}/${currentId}`,
+								method: 'POST',
+								headers: {
+									'Redioactive-Id': sendBag.id,
+									'Redioactive-NextId': sendBag.nextId,
+									'Redioactive-PrevId': sendBag.prevId
+								}
+							},
+							(res) => {
+								// Received when all data is consumed
+								if (res.statusCode === 200 || res.statusCode === 201) {
+									setImmediate(sendBag.nextFn)
+									resolve()
+									return
+								}
+								reject(
+									new Error(
+										`Redioactive: HTTP/S source: Received unexpected response of POST request for "${currentId}": ${res.statusCode}`
+									)
+								)
+							}
+						)
+						req.on('error', reject)
+						let valueStr = ''
+						switch (info.body) {
+							case BodyType.primitive:
+							case BodyType.json:
+								valueStr = JSON.stringify(sendBag.value)
+								req.setHeader('Content-Type', 'application/json')
+								req.setHeader('Content-Length', `${Buffer.byteLength(valueStr, 'utf8')}`)
+								req.end(valueStr, 'utf8')
+								break
+							case BodyType.blob:
+								req.setHeader('Content-Type', blobContentType)
+								req.setHeader('Content-Length', (sendBag.blob && sendBag.blob.length) || 0)
+								req.setHeader('Redioactive-Details', JSON.stringify(sendBag.value))
+								req.end(sendBag.blob || Buffer.alloc(0))
+								break
+						}
+					})
+			)
+			.catch((err) => {
+				const sendBag = tChest.get(currentId.toString())
+				if (sendBag) {
+					setImmediate(() => {
+						sendBag.errorFn(err)
+					})
+				} else {
+					throw new Error(
+						`Redioactive: HTTP/S source: Unable to forward error for Id "${currentId}": ${err.message}`
+					)
+				}
+			})
+	}
+
 	let ended = false
 	const bufferSize = (options && options.bufferSizeMax) || 10
 	let highWaterMark: string | number = 0
@@ -608,6 +735,9 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 				} else {
 					setImmediate(resolve)
 				}
+			}
+			if (isPush(info)) {
+				push(currentId)
 			}
 		})
 }
