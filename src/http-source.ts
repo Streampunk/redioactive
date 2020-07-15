@@ -506,7 +506,10 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 	}
 
 	let idCounter = 0
-	function push(currentId: string | number) {
+	async function push(currentId: string | number): Promise<void> {
+		console.log(
+			`Pushing ${currentId} with counter ${idCounter} compared to lowest ${lowestOfTheLow}`
+		)
 		const manifestSender = new Promise<void>((resolve, reject) => {
 			if (idCounter !== lowestOfTheLow) {
 				resolve()
@@ -524,6 +527,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					}
 				)
 				.then(() => {
+					console.log(`Sending manifest with hostname ${url.hostname}`)
 					const req = http.request(
 						{
 							hostname: url.hostname,
@@ -560,60 +564,60 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					req.end(maniJSON, 'utf8')
 				})
 		})
-		manifestSender
-			.then(
-				() =>
-					new Promise<void>((resolve, reject) => {
-						const sendBag = tChest.get(currentId.toString())
-						if (!sendBag) {
-							throw new Error('Redioactive: HTTP/S source: Could not find element to push.')
-						}
-						const req = http.request(
-							{
-								hostname: url.hostname,
-								protocol: url.protocol,
-								port: url.port,
-								path: `${info.root}/${currentId}`,
-								method: 'POST',
-								headers: {
-									'Redioactive-Id': sendBag.id,
-									'Redioactive-NextId': sendBag.nextId,
-									'Redioactive-PrevId': sendBag.prevId
-								}
-							},
-							(res) => {
-								// Received when all data is consumed
-								if (res.statusCode === 200 || res.statusCode === 201) {
-									setImmediate(sendBag.nextFn)
-									resolve()
-									return
-								}
-								reject(
-									new Error(
-										`Redioactive: HTTP/S source: Received unexpected response of POST request for "${currentId}": ${res.statusCode}`
-									)
-								)
+		return manifestSender
+			.then(() => {
+				console.log(`Sending value with id ${currentId}`)
+				return new Promise<void>((resolve, reject) => {
+					const sendBag = tChest.get(currentId.toString())
+					if (!sendBag) {
+						throw new Error('Redioactive: HTTP/S source: Could not find element to push.')
+					}
+					const req = http.request(
+						{
+							hostname: url.hostname,
+							protocol: url.protocol,
+							port: url.port,
+							path: `${info.root}/${currentId}`,
+							method: 'POST',
+							headers: {
+								'Redioactive-Id': sendBag.id,
+								'Redioactive-NextId': sendBag.nextId,
+								'Redioactive-PrevId': sendBag.prevId
 							}
-						)
-						req.on('error', reject)
-						let valueStr = ''
-						switch (info.body) {
-							case BodyType.primitive:
-							case BodyType.json:
-								valueStr = JSON.stringify(sendBag.value)
-								req.setHeader('Content-Type', 'application/json')
-								req.setHeader('Content-Length', `${Buffer.byteLength(valueStr, 'utf8')}`)
-								req.end(valueStr, 'utf8')
-								break
-							case BodyType.blob:
-								req.setHeader('Content-Type', blobContentType)
-								req.setHeader('Content-Length', (sendBag.blob && sendBag.blob.length) || 0)
-								req.setHeader('Redioactive-Details', JSON.stringify(sendBag.value))
-								req.end(sendBag.blob || Buffer.alloc(0))
-								break
+						},
+						(res) => {
+							// Received when all data is consumed
+							if (res.statusCode === 200 || res.statusCode === 201) {
+								setImmediate(sendBag.nextFn)
+								resolve()
+								return
+							}
+							reject(
+								new Error(
+									`Redioactive: HTTP/S source: Received unexpected response of POST request for "${currentId}": ${res.statusCode}`
+								)
+							)
 						}
-					})
-			)
+					)
+					req.on('error', reject)
+					let valueStr = ''
+					switch (info.body) {
+						case BodyType.primitive:
+						case BodyType.json:
+							valueStr = JSON.stringify(sendBag.value)
+							req.setHeader('Content-Type', 'application/json')
+							req.setHeader('Content-Length', `${Buffer.byteLength(valueStr, 'utf8')}`)
+							req.end(valueStr, 'utf8')
+							break
+						case BodyType.blob:
+							req.setHeader('Content-Type', blobContentType)
+							req.setHeader('Content-Length', (sendBag.blob && sendBag.blob.length) || 0)
+							req.setHeader('Redioactive-Details', JSON.stringify(sendBag.value))
+							req.end(sendBag.blob || Buffer.alloc(0))
+							break
+					}
+				})
+			})
 			.catch((err) => {
 				const sendBag = tChest.get(currentId.toString())
 				if (sendBag) {
@@ -633,6 +637,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 	let highWaterMark: string | number = 0
 	let lowWaterMark: string | number = 0
 	let lowestOfTheLow: string | number = 0
+	let pushChain = Promise.resolve()
 	return async (t: Liquid<T>): Promise<void> =>
 		new Promise((resolve, reject) => {
 			if (isNil(t) || isError(t)) {
@@ -738,7 +743,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 				}
 			}
 			if (isPush(info)) {
-				push(currentId)
+				pushChain = pushChain.then(() => push(currentId))
 			}
 		})
 }

@@ -60,6 +60,8 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 	// Assume pull for now
 	const url = new URL(uri, `http://localhost:${options.httpPort || options.httpsPort}`)
 	let info: ConInfo
+	let nextExpectedId: string | number = -1
+	let pushResolver: (v?: Liquid<T> | PromiseLike<Liquid<T>> | undefined) => void
 	url.pathname = url.pathname.replace(/\/+/g, '/')
 	if (url.pathname.endsWith('/')) {
 		url.pathname = url.pathname.slice(0, -1)
@@ -348,12 +350,10 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 
 		return () =>
 			new Promise<Liquid<T>>((resolve, _reject) => {
-				// Implement the push universe
-				resolve(end)
+				pushResolver = resolve
 			})
 	} // end PUSH
 
-	let nextExpectedId: string | number = -1
 	function pushRequest(req: IncomingMessage, res: ServerResponse) {
 		if (req.url && isPush(info)) {
 			let path = req.url.replace(/\/+/g, '/')
@@ -367,7 +367,6 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 						return endStream(req, res)
 					}
 					if (id === 'manifest.json') {
-						// TODO check status
 						let value = ''
 						req.setEncoding('utf8')
 						req.on('data', (chunk: string) => {
@@ -399,11 +398,84 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 
 						req.on('end', () => {
 							info.manifest = JSON.parse(value)
+							res.statusCode = 201
+							res.end()
 						})
 						return
 					}
 					if (id === nextExpectedId.toString()) {
-						// Deal with the incoming value
+						if (!req.headers['content-length']) {
+							throw new Error('Redioactive: HTTP/S target: Content-Length header expected')
+						}
+						const value =
+							info.body === BodyType.blob ? Buffer.allocUnsafe(+req.headers['content-length']) : ''
+						const streamSaysNextIs = req.headers['redioactive-nextid']
+						nextExpectedId = Array.isArray(streamSaysNextIs)
+							? +streamSaysNextIs[0]
+							: streamSaysNextIs
+							? +streamSaysNextIs
+							: id
+						if (info.body !== BodyType.blob) {
+							req.setEncoding('utf8')
+						}
+						let bufferPos = 0
+						res.on('data', (chunk: string | Buffer) => {
+							if (info.body === BodyType.blob) {
+								bufferPos += (<Buffer>chunk).copy(<Buffer>value, bufferPos)
+							} else {
+								;(<string>value) += <string>chunk
+							}
+						})
+						req.on('end', () => {
+							let t: T
+							if (info.body === BodyType.blob) {
+								const s = <Record<string, unknown>>{}
+								if (value.length > 0) {
+									s[(options && options.blob) || 'blob'] = value
+								}
+								let details = req.headers['redioactive-details'] || '{}'
+								if (Array.isArray(details)) {
+									details = details[0]
+								}
+								t = <T>Object.assign(s, JSON.parse(details))
+							} else {
+								t = <T>JSON.parse(<string>value)
+							}
+							if (typeof t === 'object') {
+								if (
+									Object.keys(t).length === 1 &&
+									Object.prototype.hasOwnProperty.call(t, 'end') &&
+									(<Record<string, unknown>>t)['end'] === true
+								) {
+									pushResolver(end)
+									return
+								}
+								if (options && typeof options.manifest === 'string') {
+									;(<Record<string, unknown>>t)[options.manifest] = info.manifest
+								}
+								if (options && options.seqId) {
+									;(<Record<string, unknown>>t)[options.seqId] = id
+								}
+								if (options && typeof options.delta === 'string') {
+									switch (info.delta) {
+										case DeltaType.one:
+											;(<Record<string, unknown>>t)[options.delta] = 1
+											break
+										case DeltaType.variable:
+										case DeltaType.fixed:
+											;(<Record<string, unknown>>t)[options.delta] =
+												<number>nextExpectedId - <number>+id
+											break
+										default:
+											break
+									}
+								}
+							}
+							pushResolver(t)
+							res.statusCode = 201
+							res.setHeader('Location', `${info.root}/$id`)
+							res.end()
+						})
 					}
 					return
 				}

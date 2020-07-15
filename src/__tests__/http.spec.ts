@@ -10,7 +10,7 @@ function wait(t: number): Promise<void> {
 	})
 }
 
-describe('Run a sequence of pull tests', () => {
+describe.skip('Run a sequence of pull tests', () => {
 	wait(1)
 	describe('Set up a simple http pull stream of number', () => {
 		beforeAll(async () => {
@@ -342,7 +342,7 @@ describe('Run a sequence of pull tests', () => {
 	})
 })
 
-describe('Receive a stream of primitive', () => {
+describe.skip('Receive an HTTP pull stream', () => {
 	const port = 8001
 	describe('Receive a stream of primitive values', () => {
 		beforeAll(async () => {
@@ -440,6 +440,33 @@ describe('Receive a stream of primitive', () => {
 				{ two: 'two', manifred: { wibble: true, wobble: 'false' } },
 				{ three: [1, 'plus', { two: true }], manifred: { wibble: true, wobble: 'false' } }
 			])
+		})
+		afterAll(async () => {
+			await got(`http://localhost:${port}/my/stream/id/end`)
+			await wait(500)
+		})
+	})
+})
+
+describe.only('Receive an HTTP push stream', () => {
+	const port = 8001
+	describe('Receive a stream of primitive values', () => {
+		// beforeAll(async () => {
+		// 	redio([1, 2, 3]).http('http://localhost:8001/my/stream/id', {
+		// 		httpPort: port,
+		// 		manifest: { wibble: true, wobble: 'false' }
+		// 	})
+		// 	// await wait(500)
+		// })
+		test('Create a redio HTTP stream consumer', async () => {
+			const serverSide = redio<number>(`/my/stream/id`, { httpPort: 8001 }).toArray()
+			await redio([1, 2, 3])
+				.http('http://localhost:8001/my/stream/id', {
+					httpPort: port,
+					manifest: { wibble: true, wobble: 'false' }
+				})
+				.toPromise()
+			await expect(serverSide).resolves.toEqual([1, 2, 3])
 		})
 		afterAll(async () => {
 			await got(`http://localhost:${port}/my/stream/id/end`)
