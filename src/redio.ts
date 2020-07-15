@@ -973,8 +973,67 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	zip<Z>(_ys: RedioPipe<Z>, _options?: RedioOptions): RedioPipe<[T, Z]> {
-		throw new Error('Not implemented')
+	zip<Z>(zs: RedioPipe<Z>, options?: RedioOptions): RedioPipe<[T, Z]> {
+		let pendingT: T | RedioEnd | null = null
+		let pendingZ: Z | RedioEnd | null = null
+		let tResolver: (tz: Liquid<[T, Z]> | PromiseLike<Liquid<[T, Z]>> | undefined) => void
+		let zResolver: (v: void | PromiseLike<void> | undefined) => void
+		zs.spout((z: Z | RedioEnd) => {
+			if (pendingZ === null) {
+				pendingZ = z
+			} else {
+				if (isEnd(z) && isEnd(pendingZ)) {
+					zResolver()
+				} else {
+					const a: [T, Z] = <[T, Z]>new Array(2)
+					a[1] = pendingZ as Z
+					pendingZ = z
+					tResolver(a)
+					zResolver()
+				}
+			}
+			return new Promise<void>((resolve) => {
+				zResolver = resolve
+				if (pendingT) {
+					if (isEnd(pendingT) || isEnd(pendingZ)) {
+						tResolver(end)
+					} else {
+						tResolver([pendingT as T, pendingZ as Z])
+					}
+					pendingT = null
+					pendingZ = null
+					zResolver()
+				}
+			})
+		})
+
+		return this.valve<[T, Z]>((t: T | RedioEnd): Promise<Liquid<[T, Z]>> => {
+			if (pendingT === null) {
+				pendingT = t
+			} else {
+				if (isEnd(t) && isEnd(pendingT)) {
+					tResolver(nil)
+				} else {
+					const a: [T, Z] = <[T, Z]>new Array(2)
+					a[0] = <T>pendingT
+					pendingT = t
+					tResolver(a)
+				}
+			}
+			return new Promise<Liquid<[T, Z]>>((resolve) => {
+				tResolver = resolve
+				if (pendingZ) {
+					if (isEnd(pendingT) || isEnd(pendingZ)) {
+						tResolver(end)
+					} else {
+						tResolver([pendingT as T, pendingZ as Z])
+					}
+					pendingT = null
+					pendingZ = null
+					zResolver()
+				}
+			})
+		}, options)
 	}
 
 	zipEach<Z>(_ys: RedioPipe<Z>[], _options?: RedioOptions): RedioPipe<[T, ...Z[]]> {

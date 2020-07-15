@@ -64,13 +64,13 @@ function noMatch(req: IncomingMessage, res: ServerResponse) {
 		const url = new URL(req.url)
 		if (!Object.keys(streamIDs).find((x) => url.pathname.startsWith(x))) {
 			message.status = 404
-			message.message = `No stream with available for pathname "${url.pathname}".`
+			message.message = `Redioactive: HTTP/S source: No stream available for pathname "${url.pathname}".`
 		}
 	} else {
 		message.status = req.method ? 405 : 500
 		message.message = req.method
-			? `Method ${req.method} not allowed for resource`
-			: `Cannot determine method type`
+			? `Redioactive: HTTP/S source: Method ${req.method} not allowed for resource`
+			: `Redioactive: HTTP/S source: Cannot determine method type`
 	}
 	if (message.status) {
 		res.statusCode = message.status
@@ -115,7 +115,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 				servers[options.httpPort] = server
 				server.listen(options.httpPort, () => {
 					console.log(
-						`Redioactive: HTTP/S source: HTTP server for stream ${root} listening on ${options.httpPort}`
+						`Redioactive: HTTP/S source: HTTP pull server for stream ${root} listening on ${options.httpPort}`
 					)
 				})
 			}
@@ -535,7 +535,8 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 								'Redioactive-BodyType': info.body,
 								'Redioactive-IdType': info.idType,
 								'Redioactive-DeltaType': info.delta,
-								'Redioactive-BufferSize': `${bufferSize}`
+								'Redioactive-BufferSize': `${bufferSize}`,
+								'Redioactive-NextId': currentId // Defines the start
 							}
 						},
 						(res) => {
