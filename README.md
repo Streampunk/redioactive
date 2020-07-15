@@ -90,21 +90,20 @@ _Streams_ have a beginning, a middle and an end. _Values_ are _produced_ at a st
 
 Redioactive streams are typed and consist of a _liquid_ of a given type `T` (`Liquid<T>`). Values of `T` flow down a stream in order, so if no processing is added in the middle, the same elements that flow into the stream flow out of the the other end.
 
-Processing placed along a stream may transforms a stream by consuming values of type `T` into and producing values on a stream of type `S`. The flow rate along the stream may vary:
+Processing placed along a stream may transforms a stream by consuming values of type `T` and producing values on a stream of type `S`. The flow rate along the stream may vary:
 
-- processing may produce exactly one value of type `S` for every value of type `T`, eg. accumulating an average string length, producing a stream of `Liquid<number>` for every value input value `Liquid<string>`
-- processing may produce more values of type `S` than it consumes from value of type `T` - a _one-to-many_ relationship, eg. a stream of paragraphs of type `Liquid<string>` converted to a stream of the length of each word, output stream type `(LotsOf)Liquid<number>`.
-- processing may produce less values of type `S` than it consumes of type `T` - a _many-to-one_ relationship, eg. a stream of counts of the number of input strings (`Liquid<string>`) that match a regular expression, creating a stream of `Liquid<number>`
+- processing may produce exactly one value of type `S` for every value of type `T`, eg. accumulating an average string length, producing a stream of `Liquid<number>` for every input value of type `Liquid<string>`
+- processing may produce more values of type `S` than it consumes from values of type `T` - a _one-to-many_ relationship, eg. a stream of paragraphs of type `Liquid<string>` converted to a stream of the length of each word, output stream type `(LotsOf)Liquid<number>`.
+- processing may produce less values of type `S` than it consumes of type `T` - a _many-to-one_ relationship, eg. a stream of counts of the number of input strings (`Liquid<string>`) that match a regular expression, incrementing on every match to produce a stream of `Liquid<number>`
 
 The purpose of readioactive is to ensure that the flow rate is balanced between the producers and the consumers:
 
 - limiting the speed of a busy producer to meet the flow rate at the consumer using [_back pressure_](https://www.reactivemanifesto.org/glossary#Back-Pressure) ...
-- while using buffers to ensure that
-  a consumer is not left waiting for values to flow along the entire stream when it is next hungry for more
+- while using buffers to ensure that a consumer is not left waiting for values to flow along the entire stream when it is next hungry for more
 
 #### Pipes and fittings
 
-Streams flow along _pipes_ (a `RedioPipe`) and a stream (`RedioStream`) can only be accessed (consumed) at its end. Pipes are constructed in sections with a _fitting_ at each end. Different kinds of fittings are used at different points along a pipe:
+Streams flow along _pipes_ (a `RedioPipe`) and a stream (`RedioStream`) should only be accessed (consumed) at its end. Pipes are constructed in sections with a _fitting_ at both ends. Different kinds of fittings are used at different points along a pipe:
 
 - _funnels_ at the start of pipes, receiving values from sources such as Node streams, arrays, generator functions, event emitters etc.
 - _valves_ connect two pipe sections together, with options to split or join pipes, store values in reservoirs and change flow rate and/or stream type
@@ -112,7 +111,7 @@ Streams flow along _pipes_ (a `RedioPipe`) and a stream (`RedioStream`) can only
 
 Fittiings are the building blocks for creating streams with redioactive and are expressed as functions that return a promise to produce zero, one or more values of type `T`. Specifically:
 
-- A `Funnel<T>` fitting is a [_thunk_](https://en.wikipedia.org/wiki/Thunk) function that generates a new value for the stream every time it is called. It is **vital** that this is a function that will create a new value or promise every time it is called. If a promise, the time taken to resolve will regulate the speed that the stream is produced and the thunk is called again. Built-in funnels are functions exported by redioactive as `default`.
+- A `Funnel<T>` fitting is a [_thunk_](https://en.wikipedia.org/wiki/Thunk) function that generates a new value for the stream every time it is called. It is important that this is a function that will create a new value or promise every time it is called. If a promise, the time taken to resolve will regulate the speed that the stream is produced and the thunk is called again. Built-in funnels are functions exported by redioactive as `default`.
 - A `Valve<S, T>` fitting receives a value of type `S` from the stream and tranforms it into a stream of the same or a different type `T`, with the ability to regulate the stream by returning a promise. Many-to-one valve functions may be created within a [closure](<https://en.wikipedia.org/wiki/Closure_(computer_programming)>) to allow a side-effect reservior of state to be built up.
 - A `Spout<T>` receives values at the end of the stream and takes some side effect action. If that action is asynchronous, the spout returns a promise and the time taken to resolve regulates the flow upstream.
 
@@ -135,7 +134,7 @@ Redioactive brings the benefits of Typescript's strong typing to reactive stream
 
 #### Promises just work
 
-Expressing asynchronous work as promises is becoming the defacto approach for Javascript and Typescript developers, replacing callbacks. Express asynchronous processing for each stream element
+Expressing asynchronous work as promises is becoming the defacto approach for Javascript and Typescript developers, replacing callbacks. Express asynchronous processing for each stream element as a promise, delaying resolution where it is necessary to regulate the flow.
 
 #### Fork and zip
 
