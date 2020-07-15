@@ -505,12 +505,15 @@ export interface RedioPipe<T> extends PipeFitting {
 	sequence<S>(options?: RedioOptions): RedioPipe<S>
 	series<S>(options?: RedioOptions): RedioPipe<S>
 	/**
-	 * Takes two streams and returns a stream of corresponding pairs.
-	 * The size of the resulting stream is the smaller of the two source streams.
-	 * @param ys The stream to combine values with TODO: add Array<Z> support
+	 * Takes two streams and returns a stream of corresponding pairs. If one stream is
+	 * running faster than the other - it produces two values in the time that the other
+	 * produces one - then a pair containing one undefined value may be produced.
+	 * At stream end, the size of the resulting stream is determined by the smaller of
+	 * the two source streams.
+	 * @param ys The stream to combine values with
 	 * @param options Optional configuration
 	 */
-	zip<Z>(ys: RedioPipe<Z>, options?: RedioOptions): RedioPipe<[T, Z]>
+	zip<Z>(ys: RedioPipe<Z>, options?: RedioOptions): RedioPipe<[T?, Z?]>
 	/**
 	 * Takes a stream and an array of N streams and returns a stream
 	 * of the corresponding (N+1)-tuples.
@@ -973,10 +976,10 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	zip<Z>(zs: RedioPipe<Z>, options?: RedioOptions): RedioPipe<[T, Z]> {
+	zip<Z>(zs: RedioPipe<Z>, options?: RedioOptions): RedioPipe<[T?, Z?]> {
 		let pendingT: T | RedioEnd | null = null
 		let pendingZ: Z | RedioEnd | null = null
-		let tResolver: (tz: Liquid<[T, Z]> | PromiseLike<Liquid<[T, Z]>> | undefined) => void
+		let tResolver: (tz: Liquid<[T?, Z?]> | PromiseLike<Liquid<[T, Z]>> | undefined) => void
 		let zResolver: (v: void | PromiseLike<void> | undefined) => void
 		zs.spout((z: Z | RedioEnd) => {
 			if (pendingZ === null) {
@@ -985,10 +988,8 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 				if (isEnd(z) && isEnd(pendingZ)) {
 					zResolver()
 				} else {
-					const a: [T, Z] = <[T, Z]>new Array(2)
-					a[1] = pendingZ as Z
+					tResolver([undefined, <Z>pendingZ])
 					pendingZ = z
-					tResolver(a)
 					zResolver()
 				}
 			}
@@ -1007,21 +1008,20 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 			})
 		})
 
-		return this.valve<[T, Z]>((t: T | RedioEnd): Promise<Liquid<[T, Z]>> => {
-			if (pendingT === null) {
-				pendingT = t
-			} else {
-				if (isEnd(t) && isEnd(pendingT)) {
-					tResolver(nil)
-				} else {
-					const a: [T, Z] = <[T, Z]>new Array(2)
-					a[0] = <T>pendingT
-					pendingT = t
-					tResolver(a)
-				}
-			}
-			return new Promise<Liquid<[T, Z]>>((resolve) => {
+		return this.valve<[T?, Z?]>((t: T | RedioEnd): Promise<Liquid<[T?, Z?]>> => {
+			return new Promise<Liquid<[T?, Z?]>>((resolve) => {
 				tResolver = resolve
+				if (pendingT === null) {
+					pendingT = t
+				} else {
+					console.log('Here I am!')
+					if (isEnd(t) && isEnd(pendingT)) {
+						tResolver(nil)
+					} else {
+						tResolver([<T>pendingT, undefined])
+						pendingT = t
+					}
+				}
 				if (pendingZ) {
 					if (isEnd(pendingT) || isEnd(pendingZ)) {
 						tResolver(end)
