@@ -1,4 +1,4 @@
-import { HTTPOptions, Funnel, Liquid, literal, end } from './redio'
+import { HTTPOptions, Funnel, Liquid, literal, end, isEnd } from './redio'
 import { ProtocolType, IdType, DeltaType, BodyType } from './http-common'
 import http, { Server, createServer, IncomingMessage, ServerResponse } from 'http'
 import { Server as ServerS, createServer as createServerS } from 'https'
@@ -208,7 +208,7 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 							if (!res.headers['content-length']) {
 								throw new Error('Redioactive: HTTP/S target: Content-Length header expected')
 							}
-							const value =
+							let value =
 								info.body === BodyType.blob
 									? Buffer.allocUnsafe(+res.headers['content-length'])
 									: ''
@@ -223,10 +223,10 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 							}
 							let bufferPos = 0
 							res.on('data', (chunk: string | Buffer) => {
-								if (info.body === BodyType.blob) {
-									bufferPos += (<Buffer>chunk).copy(<Buffer>value, bufferPos)
+								if (!chunkIsString(value)) {
+									bufferPos += (<Buffer>chunk).copy(value, bufferPos)
 								} else {
-									;(<string>value) += <string>chunk
+									value += <string>chunk
 								}
 							})
 							res.on('end', () => {
@@ -362,6 +362,11 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 			}
 			if (path.startsWith(info.root)) {
 				const id = path.slice(info.root.length + 1)
+				console.log(
+					`Processing ${req.method} with url ${
+						req.url
+					} and ${typeof id} id ${id}, expected ${nextExpectedId}`
+				)
 				if (req.method === 'POST') {
 					if (id === 'end') {
 						return endStream(req, res)
@@ -398,7 +403,9 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 
 						req.on('end', () => {
 							info.manifest = JSON.parse(value)
+							console.log(`Received manifest`)
 							res.statusCode = 201
+							res.setHeader('Location', `${info.root}/manifest.json`)
 							res.end()
 						})
 						return
@@ -407,7 +414,7 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 						if (!req.headers['content-length']) {
 							throw new Error('Redioactive: HTTP/S target: Content-Length header expected')
 						}
-						const value =
+						let value =
 							info.body === BodyType.blob ? Buffer.allocUnsafe(+req.headers['content-length']) : ''
 						const streamSaysNextIs = req.headers['redioactive-nextid']
 						nextExpectedId = Array.isArray(streamSaysNextIs)
@@ -419,11 +426,11 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 							req.setEncoding('utf8')
 						}
 						let bufferPos = 0
-						res.on('data', (chunk: string | Buffer) => {
-							if (info.body === BodyType.blob) {
-								bufferPos += (<Buffer>chunk).copy(<Buffer>value, bufferPos)
+						req.on('data', (chunk: string | Buffer) => {
+							if (!chunkIsString(value)) {
+								bufferPos += (<Buffer>chunk).copy(value, bufferPos)
 							} else {
-								;(<string>value) += <string>chunk
+								value += <string>chunk
 							}
 						})
 						req.on('end', () => {
@@ -448,6 +455,9 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 									(<Record<string, unknown>>t)['end'] === true
 								) {
 									pushResolver(end)
+									endStream(req)
+									res.statusCode = 200
+									res.end()
 									return
 								}
 								if (options && typeof options.manifest === 'string') {
@@ -474,6 +484,10 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 							pushResolver(t)
 							res.statusCode = 201
 							res.setHeader('Location', `${info.root}/$id`)
+							if (isEnd(t)) {
+								console.log('End of stream detected')
+								endStream(req)
+							}
 							res.end()
 						})
 					}
@@ -485,6 +499,9 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 					}
 					if (id === 'end') {
 						return endStream(req, res)
+					}
+					if (id === 'manifest') {
+						// send manifest
 					}
 				}
 			}
@@ -517,7 +534,7 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 		res.end(debugString, 'utf8')
 	}
 
-	function endStream(req: IncomingMessage, res: ServerResponse) {
+	function endStream(req: IncomingMessage, res?: ServerResponse) {
 		const isSSL = Object.prototype.hasOwnProperty.call(req.socket, 'encrypted')
 		const port = req.socket.localPort
 		if (isPush(info)) {
@@ -540,9 +557,11 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 							} on port ${port} closed.`
 						)
 					})
-				res.setHeader('Content-Type', 'application/json')
-				res.setHeader('Content-Length', 2)
-				res.end('OK', 'utf8')
+				if (res) {
+					res.setHeader('Content-Type', 'application/json')
+					res.setHeader('Content-Length', 2)
+					res.end('OK', 'utf8')
+				}
 				delete streamIDs[info.root]
 				if (
 					!Object.values(streamIDs).some(
@@ -561,5 +580,9 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 				)
 			}
 		}
+	}
+
+	function chunkIsString(_x: string | Buffer): _x is string {
+		return info.body !== BodyType.blob
 	}
 }

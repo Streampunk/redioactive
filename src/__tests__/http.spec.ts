@@ -451,13 +451,6 @@ describe.skip('Receive an HTTP pull stream', () => {
 describe.only('Receive an HTTP push stream', () => {
 	const port = 8001
 	describe('Receive a stream of primitive values', () => {
-		// beforeAll(async () => {
-		// 	redio([1, 2, 3]).http('http://localhost:8001/my/stream/id', {
-		// 		httpPort: port,
-		// 		manifest: { wibble: true, wobble: 'false' }
-		// 	})
-		// 	// await wait(500)
-		// })
 		test('Create a redio HTTP stream consumer', async () => {
 			const serverSide = redio<number>(`/my/stream/id`, { httpPort: 8001 }).toArray()
 			await redio([1, 2, 3])
@@ -468,9 +461,11 @@ describe.only('Receive an HTTP push stream', () => {
 				.toPromise()
 			await expect(serverSide).resolves.toEqual([1, 2, 3])
 		})
-		afterAll(async () => {
-			await got(`http://localhost:${port}/my/stream/id/end`)
-			await wait(500)
+		test('Server closes afterwards', async () => {
+			wait(500)
+			await expect(
+				got(`http://localhost:${port}/my/stream/id/debug.json`, { timeout: 200 })
+			).rejects.toBeTruthy()
 		})
 	})
 })

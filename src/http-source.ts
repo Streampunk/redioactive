@@ -544,11 +544,12 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 							}
 						},
 						(res) => {
-							if (res.statusCode === 200) {
+							if (res.statusCode === 200 || res.statusCode === 201) {
+								console.log('Manifest sent')
 								resolve()
 							} else {
 								reject(
-									new Error(`After posting manifest, unexptected respose code "${res.statusCode}"`)
+									new Error(`After posting manifest, unexptected response code "${res.statusCode}"`)
 								)
 							}
 							res.on('error', reject)
