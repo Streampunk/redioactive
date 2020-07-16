@@ -1,4 +1,4 @@
-import { HTTPOptions, Funnel, Liquid, literal, end, isEnd } from './redio'
+import { HTTPOptions, Funnel, Liquid, literal, end } from './redio'
 import { ProtocolType, IdType, DeltaType, BodyType } from './http-common'
 import http, { Server, createServer, IncomingMessage, ServerResponse } from 'http'
 import { Server as ServerS, createServer as createServerS } from 'https'
@@ -162,10 +162,8 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 						res.on('data', (chunk: string) => {
 							manifestStr += chunk
 						})
-						// console.log('Getting manifest response', res.headers['content-length'])
 						res.on('end', () => {
 							info.manifest = JSON.parse(manifestStr)
-							// console.log('Ending with a manifest', info.manifest, manifestStr)
 							manifestly = true
 							if (starter) {
 								initDone()
@@ -189,7 +187,6 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 				// 5. Get ready for the next pull or detect end
 				// 6. resolve
 				initialized.then(() => {
-					// console.log('From the funnel', streamCounter, info.manifest, nextId)
 					const valueReq = http.request(
 						{
 							hostname: url.hostname,
@@ -362,11 +359,11 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 			}
 			if (path.startsWith(info.root)) {
 				const id = path.slice(info.root.length + 1)
-				console.log(
-					`Processing ${req.method} with url ${
-						req.url
-					} and ${typeof id} id ${id}, expected ${nextExpectedId}`
-				)
+				// console.log(
+				// 	`Processing ${req.method} with url ${
+				// 		req.url
+				// 	} and ${typeof id} id ${id}, expected ${nextExpectedId}`
+				// )
 				if (req.method === 'POST') {
 					if (id === 'end') {
 						return endStream(req, res)
@@ -403,7 +400,6 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 
 						req.on('end', () => {
 							info.manifest = JSON.parse(value)
-							console.log(`Received manifest`)
 							res.statusCode = 201
 							res.setHeader('Location', `${info.root}/manifest.json`)
 							res.end()
@@ -484,10 +480,6 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 							pushResolver(t)
 							res.statusCode = 201
 							res.setHeader('Location', `${info.root}/$id`)
-							if (isEnd(t)) {
-								console.log('End of stream detected')
-								endStream(req)
-							}
 							res.end()
 						})
 					}
@@ -500,8 +492,8 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 					if (id === 'end') {
 						return endStream(req, res)
 					}
-					if (id === 'manifest') {
-						// send manifest
+					if (id === 'manifest.json') {
+						return sendManifest(res)
 					}
 				}
 			}
@@ -532,6 +524,13 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 		res.setHeader('Content-Type', 'application/json')
 		res.setHeader('Content-Length', `${Buffer.byteLength(debugString, 'utf8')}`)
 		res.end(debugString, 'utf8')
+	}
+
+	function sendManifest(res: ServerResponse) {
+		const maniString = JSON.stringify(info.manifest)
+		res.setHeader('Content-Type', 'application/json')
+		res.setHeader('Content-Length', `${Buffer.byteLength(maniString, 'utf8')}`)
+		res.end(maniString, 'utf8')
 	}
 
 	function endStream(req: IncomingMessage, res?: ServerResponse) {

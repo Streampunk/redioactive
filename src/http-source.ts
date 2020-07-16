@@ -276,11 +276,11 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					//})
 					return
 				} else {
-					for (const k of [nextId.toString()][Symbol.iterator]()) {
-						console.log('**** About to fuzzy match with nextId', k)
-					}
+					// for (const k of [nextId.toString()][Symbol.iterator]()) {
+					// 	console.log('**** About to fuzzy match with nextId', k)
+					// }
 					if (fuzzyIDMatch(id, [nextId.toString()][Symbol.iterator]())) {
-						console.log('*** Fuzzy match with next', id)
+						// console.log('*** Fuzzy match with next', id)
 						const pending = new Promise<void>((resolve) => {
 							const clearer = setTimeout(resolve, (options && options.timeout) || 5000)
 							pendings.push(() => {
@@ -507,9 +507,9 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 
 	let idCounter = 0
 	async function push(currentId: string | number): Promise<void> {
-		console.log(
-			`Pushing ${currentId} with counter ${idCounter} compared to lowest ${lowestOfTheLow}`
-		)
+		// console.log(
+		// 	`Pushing ${currentId} with counter ${idCounter} compared to lowest ${lowestOfTheLow}`
+		// )
 		const manifestSender = new Promise<void>((resolve, reject) => {
 			if (idCounter !== lowestOfTheLow) {
 				resolve()
@@ -527,7 +527,6 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					}
 				)
 				.then(() => {
-					console.log(`Sending manifest with hostname ${url.hostname}`)
 					const req = http.request(
 						{
 							hostname: url.hostname,
@@ -545,7 +544,6 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 						},
 						(res) => {
 							if (res.statusCode === 200 || res.statusCode === 201) {
-								console.log('Manifest sent')
 								resolve()
 							} else {
 								reject(
@@ -567,7 +565,6 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 		})
 		return manifestSender
 			.then(() => {
-				console.log(`Sending value with id ${currentId}`)
 				return new Promise<void>((resolve, reject) => {
 					const sendBag = tChest.get(currentId.toString())
 					if (!sendBag) {

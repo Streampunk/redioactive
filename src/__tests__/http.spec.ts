@@ -10,7 +10,7 @@ function wait(t: number): Promise<void> {
 	})
 }
 
-describe.skip('Run a sequence of pull tests', () => {
+describe('Run a sequence of pull tests', () => {
 	wait(1)
 	describe('Set up a simple http pull stream of number', () => {
 		beforeAll(async () => {
@@ -342,7 +342,7 @@ describe.skip('Run a sequence of pull tests', () => {
 	})
 })
 
-describe.skip('Receive an HTTP pull stream', () => {
+describe('Receive an HTTP pull stream', () => {
 	const port = 8001
 	describe('Receive a stream of primitive values', () => {
 		beforeAll(async () => {
@@ -448,18 +448,116 @@ describe.skip('Receive an HTTP pull stream', () => {
 	})
 })
 
-describe.only('Receive an HTTP push stream', () => {
-	const port = 8001
+describe('Receive an HTTP push stream', () => {
 	describe('Receive a stream of primitive values', () => {
-		test('Create a redio HTTP stream consumer', async () => {
-			const serverSide = redio<number>(`/my/stream/id`, { httpPort: 8001 }).toArray()
+		const port = 8005
+		let serverSide: Promise<number[]>
+		beforeAll(async () => {
+			serverSide = redio<number>(`/my/stream/id`, { httpPort: port }).toArray()
 			await redio([1, 2, 3])
-				.http('http://localhost:8001/my/stream/id', {
+				.http(`http://localhost:${port}/my/stream/id`, {
 					httpPort: port,
 					manifest: { wibble: true, wobble: 'false' }
 				})
 				.toPromise()
+		})
+		test('Stream provides debug', async () => {
+			const debugRes = await got(`http://localhost:${port}/my/stream/id/debug.json`, {
+				responseType: 'json'
+			})
+			expect(debugRes.headers['content-type']).toBe('application/json')
+			expect(debugRes.headers['content-length']).toBeTruthy()
+			expect(debugRes.body).toMatchObject({
+				info: {
+					type: 'push',
+					protocol: 'http',
+					root: '/my/stream/id',
+					idType: 'counter',
+					body: 'primitive',
+					delta: 'one',
+					manifest: { wibble: true, wobble: 'false' },
+					httpPort: port
+				},
+				uri: '/my/stream/id',
+				url: `http://localhost:${port}/my/stream/id`,
+				streamIDs: { '/my/stream/id': { httpPort: port } }
+			})
+		})
+		test('Stream provides manifest', async () => {
+			const manifest = await got(`http://localhost:${port}/my/stream/id/manifest.json`, {
+				responseType: 'json'
+			})
+			expect(manifest.body).toEqual({ wibble: true, wobble: 'false' })
+			expect(manifest.headers['content-type']).toBe('application/json')
+			expect(manifest.headers['content-length']).toBeTruthy()
+		})
+		test('Stream arrives as expected', async () => {
 			await expect(serverSide).resolves.toEqual([1, 2, 3])
+		})
+		test('Server closes afterwards', async () => {
+			wait(500)
+			await expect(
+				got(`http://localhost:${port}/my/stream/id/debug.json`, { timeout: 200 })
+			).rejects.toBeTruthy()
+		})
+	})
+
+	describe('Receive a stream of JSON', () => {
+		const port = 8006
+		let serverSide: Promise<Record<string, unknown>[]>
+		beforeAll(async () => {
+			serverSide = redio<Record<string, unknown>>(`/my/stream/id`, {
+				httpPort: port,
+				manifest: 'manifred'
+			}).toArray()
+			await redio([{ one: 1 }, { two: 'two' }, { three: [1, 'plus', { two: true }] }])
+				.http(`http://localhost:${port}/my/stream/id`, {
+					httpPort: port,
+					manifest: { wibble: true, wobble: 'false' }
+				})
+				.toPromise()
+		})
+		test('Stream arrives as expected', async () => {
+			await expect(serverSide).resolves.toEqual([
+				{ one: 1, manifred: { wibble: true, wobble: 'false' } },
+				{ two: 'two', manifred: { wibble: true, wobble: 'false' } },
+				{ three: [1, 'plus', { two: true }], manifred: { wibble: true, wobble: 'false' } }
+			])
+		})
+		test('Server closes afterwards', async () => {
+			wait(500)
+			await expect(
+				got(`http://localhost:${port}/my/stream/id/debug.json`, { timeout: 200 })
+			).rejects.toBeTruthy()
+		})
+	})
+
+	describe('Receive a stream of buffer', () => {
+		const port = 8007
+		let serverSide: Promise<Record<string, unknown>[]>
+		beforeAll(async () => {
+			serverSide = redio<Record<string, unknown>>(`/my/stream/id`, {
+				httpPort: port,
+				blob: 'data'
+			}).toArray()
+			await redio([
+				{ one: 1, data: Buffer.from([1, 1, 1]) },
+				{ two: 'two', data: Buffer.from([2, 2, 2]) },
+				{ three: [1, 'plus', { two: true }], data: Buffer.from([3, 3, 3]) }
+			])
+				.http(`http://localhost:${port}/my/stream/id`, {
+					httpPort: port,
+					manifest: { wibble: true, wobble: 'false' },
+					blob: 'data'
+				})
+				.toPromise()
+		})
+		test('Stream arrives as expected', async () => {
+			await expect(serverSide).resolves.toEqual([
+				{ one: 1, data: Buffer.from([1, 1, 1]) },
+				{ two: 'two', data: Buffer.from([2, 2, 2]) },
+				{ three: [1, 'plus', { two: true }], data: Buffer.from([3, 3, 3]) }
+			])
 		})
 		test('Server closes afterwards', async () => {
 			wait(500)
