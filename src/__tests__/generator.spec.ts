@@ -175,3 +175,18 @@ describe('Generator from events', () => {
 		await expect(stream).resolves.toEqual(['fred', 'ginger'])
 	})
 })
+
+describe.only('Generate, then consume later', () => {
+	test('Make more than we can eat', async () => {
+		const str = redio([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
+		const endStr = str.each((x) => {
+			return new Promise<void>((resolve) => {
+				setTimeout(() => {
+					console.log(x)
+					resolve()
+				}, 100)
+			})
+		})
+		await expect(endStr.toPromise()).resolves.toBeTruthy()
+	})
+})
