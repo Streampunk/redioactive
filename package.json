@@ -1,6 +1,6 @@
 {
 	"name": "redioactive",
-	"version": "0.0.4",
+	"version": "0.0.5",
 	"description": "Reactive streams for chaining overlapping promises.",
 	"main": "dist/index.js",
 	"types": "dist/redio.d.ts",

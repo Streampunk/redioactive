@@ -464,7 +464,7 @@ export interface RedioPipe<T> extends PipeFitting {
 	 *  @param options Optional configuration.
 	 *  @returns Stream containing only the first `num` elements from the source.
 	 */
-	take(num: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
+	take(num?: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
 	tap(f: (t: T) => Promise<void> | void, options?: RedioOptions): RedioPipe<T>
 	throttle(ms: number, options?: RedioOptions): RedioPipe<T>
 	uniq(options?: RedioOptions): RedioPipe<T>
@@ -886,11 +886,12 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	take(num: number | Promise<number>, options?: RedioOptions): RedioPipe<T> {
+	take(num?: number | Promise<number>, options?: RedioOptions): RedioPipe<T> {
 		let count = 0
+		const tnum = num ? num : 1
 		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
 			if (!isEnd(t)) {
-				return count++ < (await num) ? t : nil
+				return count++ < (await tnum) ? t : nil
 			}
 			return end
 		}, options)

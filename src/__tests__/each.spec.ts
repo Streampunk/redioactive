@@ -1,5 +1,5 @@
 'use strict'
-import redio from '../redio'
+import redio, { nil } from '../redio'
 
 describe('Test the each processing of values', () => {
 	test('Each is called the expected number of times', async () => {
@@ -36,5 +36,23 @@ describe('Test the each processing of values', () => {
 		await redio([100, 200, 300, 400]).each(wait, { debug: false }).toPromise()
 		expect(wait).toHaveBeenCalledTimes(4)
 		expect(wait).toHaveBeenLastCalledWith(400)
+	})
+	test('End with a promise', async () => {
+		await expect(
+			redio([301, 401, 501, 601])
+				.each(() => {
+					/* void */
+				})
+				.toPromise()
+		).resolves.toEqual(601)
+	})
+	test('Empty strean end with promise', async () => {
+		await expect(
+			redio([])
+				.each(() => {
+					/* void */
+				})
+				.toPromise()
+		).resolves.toEqual(nil)
 	})
 })
