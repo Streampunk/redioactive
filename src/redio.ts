@@ -484,7 +484,7 @@ export interface RedioPipe<T> extends PipeFitting {
 	 *  @typeparam M   Type of values contained in the output stream.
 	 *  @returns       Sequence of values from streams crated by applying `f`.
 	 */
-	flatMap<M>(f: (t: T | RedioEnd) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M>
+	flatMap<M>(f: (t: T) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M>
 	flatten<F>(options?: RedioOptions): RedioPipe<F> // where T === Liquid<F>
 	/**
 	 *  Split the stream into two or more separate streams with shared backpressure.
@@ -927,8 +927,8 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	flatMap<M>(mapper: (t: T | RedioEnd) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M> {
-		const localOptions = Object.assign(options, { oneToMany: true } as RedioOptions)
+	flatMap<M>(mapper: (t: T) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M> {
+		const localOptions = Object.assign(options || {}, { oneToMany: true } as RedioOptions)
 		return this.valve(async (t: T | RedioEnd): Promise<LotsOfLiquid<M>> => {
 			if (!isEnd(t)) {
 				const values = await mapper(t).toArray()
