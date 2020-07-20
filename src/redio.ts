@@ -70,7 +70,7 @@ export type Liquid<T> = T | RedioEnd | RedioNil | Error
  *  when a processing stage produces more than it consumes, a _one-to-many_
  *  function, to represent a sequence of values to be flattened into the stream.
  */
-export type LotsOfLiquid<T> = Liquid<T> | Array<Liquid<T>>
+export type LotsOfLiquid<T> = Liquid<T> | Array<Liquid<T | RedioEnd>>
 
 /**
  * Test a value to see if it is an stream value, not `end`, `nil` or an error.
@@ -442,7 +442,10 @@ export interface RedioPipe<T> extends PipeFitting {
 	 *  @param options Optional configuration.
 	 *  @returns Stream of transformed values.
 	 */
-	map<M>(mapper: (t: T) => M | Promise<M>, options?: RedioOptions): RedioPipe<M>
+	map<M>(
+		mapper: (t: T) => M | Promise<M> | Array<M | RedioEnd> | Promise<Array<M | RedioEnd>>,
+		options?: RedioOptions
+	): RedioPipe<M>
 	pick(properties: Array<string>, options?: RedioOptions): RedioPipe<T>
 	pickBy(f: (key: string, value: unknown) => boolean, options?: RedioOptions): RedioPipe<T>
 	pluck(prop: string, options?: RedioOptions): RedioPipe<T>
@@ -502,6 +505,12 @@ export interface RedioPipe<T> extends PipeFitting {
 	observe(options?: RedioOptions): RedioPipe<T>
 	otherwise<O>(ys: RedioPipe<O> | (() => RedioPipe<O>), options?: RedioOptions): RedioPipe<T | O>
 	parallel<P>(n: number, options?: RedioOptions): RedioPipe<P>
+	/**
+	 *  Reads a stream of streams and pushes each value on each streeam in sequence
+	 *  in turn onto the output pipe, a kind of flatten.
+	 *
+	 *  @param options
+	 */
 	sequence<S>(options?: RedioOptions): RedioPipe<S>
 	series<S>(options?: RedioOptions): RedioPipe<S>
 	/**
@@ -817,8 +826,11 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	map<M>(mapper: (t: T) => M | Promise<M>, options?: RedioOptions): RedioPipe<M> {
-		return this.valve(async (t: Liquid<T>): Promise<Liquid<M>> => {
+	map<M>(
+		mapper: (t: T) => M | Promise<M> | Array<M | RedioEnd> | Promise<Array<M | RedioEnd>>,
+		options?: RedioOptions
+	): RedioPipe<M> {
+		return this.valve(async (t: Liquid<T>): Promise<LotsOfLiquid<M>> => {
 			if (isValue(t)) {
 				return mapper(t)
 			}
@@ -1202,6 +1214,9 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 					if (Array.isArray(result)) {
 						if (this._oneToMany) {
 							result.forEach((x) => isValue(x) && this.push(x))
+							if (result.some(isEnd)) {
+								this.push(end)
+							}
 						} else {
 							// Odd situation where T is an Array<X>
 							this.push((result as unknown) as T)
@@ -1209,6 +1224,9 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 						if (isEnd(v) && result.length > 0 && !isEnd(result[result.length - 1])) {
 							this.push(end)
 						}
+						// if (!isEnd(v) && result.length > 0 && isEnd(result[result.length - 1])) {
+						// 	this.push(end)
+						// }
 					} else if (isNil(result)) {
 						// Don't push
 						if (isEnd(v)) {

@@ -62,6 +62,10 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 	let info: ConInfo
 	let nextExpectedId: string | number = -1
 	let pushResolver: (v?: Liquid<T> | PromiseLike<Liquid<T>> | undefined) => void
+	let pushPull: (v?: void | PromiseLike<void> | undefined) => void = () => {
+		/* void */
+	}
+	let pushPullP: Promise<void> = Promise.resolve()
 	url.pathname = url.pathname.replace(/\/+/g, '/')
 	if (url.pathname.endsWith('/')) {
 		url.pathname = url.pathname.slice(0, -1)
@@ -347,6 +351,8 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 
 		return () =>
 			new Promise<Liquid<T>>((resolve, _reject) => {
+				// console.log('Calling pushPull()')
+				pushPull()
 				pushResolver = resolve
 			})
 	} // end PUSH
@@ -422,66 +428,72 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 							req.setEncoding('utf8')
 						}
 						let bufferPos = 0
-						req.on('data', (chunk: string | Buffer) => {
-							if (!chunkIsString(value)) {
-								bufferPos += (<Buffer>chunk).copy(value, bufferPos)
-							} else {
-								value += <string>chunk
-							}
-						})
-						req.on('end', () => {
-							let t: T
-							if (info.body === BodyType.blob) {
-								const s = <Record<string, unknown>>{}
-								if (value.length > 0) {
-									s[(options && options.blob) || 'blob'] = value
+						// console.log('About to wait on pushPull', req.url, pushPullP)
+						pushPullP.then(() => {
+							pushPullP = new Promise((resolve) => {
+								pushPull = resolve
+							})
+							req.on('data', (chunk: string | Buffer) => {
+								if (!chunkIsString(value)) {
+									bufferPos += (<Buffer>chunk).copy(value, bufferPos)
+								} else {
+									value += <string>chunk
 								}
-								let details = req.headers['redioactive-details'] || '{}'
-								if (Array.isArray(details)) {
-									details = details[0]
+							})
+							req.on('end', () => {
+								let t: T
+								if (info.body === BodyType.blob) {
+									const s = <Record<string, unknown>>{}
+									if (value.length > 0) {
+										s[(options && options.blob) || 'blob'] = value
+									}
+									let details = req.headers['redioactive-details'] || '{}'
+									if (Array.isArray(details)) {
+										details = details[0]
+									}
+									t = <T>Object.assign(s, JSON.parse(details))
+								} else {
+									t = <T>JSON.parse(<string>value)
 								}
-								t = <T>Object.assign(s, JSON.parse(details))
-							} else {
-								t = <T>JSON.parse(<string>value)
-							}
-							if (typeof t === 'object') {
-								if (
-									Object.keys(t).length === 1 &&
-									Object.prototype.hasOwnProperty.call(t, 'end') &&
-									(<Record<string, unknown>>t)['end'] === true
-								) {
-									pushResolver(end)
-									endStream(req)
-									res.statusCode = 200
-									res.end()
-									return
-								}
-								if (options && typeof options.manifest === 'string') {
-									;(<Record<string, unknown>>t)[options.manifest] = info.manifest
-								}
-								if (options && options.seqId) {
-									;(<Record<string, unknown>>t)[options.seqId] = id
-								}
-								if (options && typeof options.delta === 'string') {
-									switch (info.delta) {
-										case DeltaType.one:
-											;(<Record<string, unknown>>t)[options.delta] = 1
-											break
-										case DeltaType.variable:
-										case DeltaType.fixed:
-											;(<Record<string, unknown>>t)[options.delta] =
-												<number>nextExpectedId - <number>+id
-											break
-										default:
-											break
+								if (typeof t === 'object') {
+									if (
+										Object.keys(t).length === 1 &&
+										Object.prototype.hasOwnProperty.call(t, 'end') &&
+										(<Record<string, unknown>>t)['end'] === true
+									) {
+										pushResolver(end)
+										endStream(req)
+										res.statusCode = 200
+										res.end()
+										return
+									}
+									if (options && typeof options.manifest === 'string') {
+										;(<Record<string, unknown>>t)[options.manifest] = info.manifest
+									}
+									if (options && options.seqId) {
+										;(<Record<string, unknown>>t)[options.seqId] = id
+									}
+									if (options && typeof options.delta === 'string') {
+										switch (info.delta) {
+											case DeltaType.one:
+												;(<Record<string, unknown>>t)[options.delta] = 1
+												break
+											case DeltaType.variable:
+											case DeltaType.fixed:
+												;(<Record<string, unknown>>t)[options.delta] =
+													<number>nextExpectedId - <number>+id
+												break
+											default:
+												break
+										}
 									}
 								}
-							}
-							pushResolver(t)
-							res.statusCode = 201
-							res.setHeader('Location', `${info.root}/$id`)
-							res.end()
-						})
+								pushResolver(t)
+								res.statusCode = 201
+								res.setHeader('Location', `${info.root}/$id`)
+								res.end()
+							})
+						}) // Read data only when ready
 					}
 					return
 				}
@@ -536,6 +548,8 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 	function endStream(req: IncomingMessage, res?: ServerResponse) {
 		const isSSL = Object.prototype.hasOwnProperty.call(req.socket, 'encrypted')
 		const port = req.socket.localPort
+		pushPull()
+		pushPullP = Promise.resolve()
 		if (isPush(info)) {
 			try {
 				info.server &&

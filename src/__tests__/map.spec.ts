@@ -1,4 +1,4 @@
-import redio from '../redio'
+import redio, { end } from '../redio'
 
 describe('Mapping values in a stream', () => {
 	test('Convert some uppercase strings to lowercase', async () => {
@@ -47,5 +47,12 @@ describe('Mapping values in a stream', () => {
 				.map((x) => (x % 2 === 0 ? [x] : []), { oneToMany: true })
 				.toArray()
 		).resolves.toEqual([2, 4, 6])
+	})
+	test('One to many with end', async () => {
+		await expect(
+			redio([1, 2, 3, 4, 5, 6])
+				.map((x) => (x < 4 ? [x] : [4, end]), { oneToMany: true })
+				.toArray()
+		).resolves.toEqual([1, 2, 3, 4])
 	})
 })

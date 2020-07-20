@@ -11,7 +11,7 @@ const doStream = async (delay: number): Promise<void> => {
 		async () => {
 			return counter < 6 ? counter++ : end
 		},
-		{ bufferSizeMax: 3, debug: true }
+		{ bufferSizeMax: 3, debug: false }
 	)
 
 	if (delay > 0) {
@@ -23,8 +23,8 @@ const doStream = async (delay: number): Promise<void> => {
 	return new Promise<void>((resolve) => {
 		console.log('Connecting', gen)
 		gen
-			.valve<number>(async (count: number | RedioEnd) => count, { debug: delay > 0 })
-			.each(console.log, { debug: true })
+			.valve<number>(async (count: number | RedioEnd) => count, { debug: false /* delay > 0 */ })
+			.each(console.log, { debug: false })
 			.done(async () => {
 				console.log('There we go!')
 				return resolve()
@@ -34,8 +34,8 @@ const doStream = async (delay: number): Promise<void> => {
 }
 
 async function run(): Promise<void> {
-	console.log('No waiting for start...')
-	await doStream(0)
+	// console.log('No waiting for start...')
+	// await doStream(0)
 	console.log('\nAgain but with wait...')
 	await doStream(20)
 }

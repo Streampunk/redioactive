@@ -22,11 +22,11 @@ describe('Run a sequence of pull tests', () => {
 	}
 	describe('Set up a simple http pull stream of number', () => {
 		beforeAll(async () => {
-			redio([1, 2, 3]).http('/my/stream/id', { httpsPort: 8001, serverOptions })
+			redio([1, 2, 3]).http('/my/stream/id', { httpsPort: 9001, serverOptions })
 			// await wait(500)
 		})
 		test('Check debug info', async () => {
-			const debug = await got<any>('https://localhost:8001/my/stream/id/debug.json', {
+			const debug = await got<any>('https://localhost:9001/my/stream/id/debug.json', {
 				responseType: 'json',
 				https
 			})
@@ -39,19 +39,19 @@ describe('Run a sequence of pull tests', () => {
 				idType: 'counter',
 				delta: 'one',
 				manifest: {},
-				httpsPort: 8001
+				httpsPort: 9001
 			})
 			expect(debug.body.tChestSize).toBe(4)
 			expect(debug.body.ended).toBe(true)
 		})
 		test('Check start redirect', async () => {
-			const starter = await got<any>('https://localhost:8001/my/stream/id/start', {
+			const starter = await got<any>('https://localhost:9001/my/stream/id/start', {
 				followRedirect: false,
 				https
 			})
 			expect(starter.headers['location']).toBeTruthy()
 			expect(starter.headers['location']).toMatch('https:')
-			expect(starter.headers['location']).toMatch(':8001')
+			expect(starter.headers['location']).toMatch(':9001')
 			expect(starter.headers['location']).toMatch('/my/stream/id')
 			expect(starter.headers['location']?.endsWith('/1')).toBe(true)
 
@@ -63,13 +63,13 @@ describe('Run a sequence of pull tests', () => {
 			expect(starter.headers['content-length']).toBe('0')
 		})
 		test('Check latest redirect', async () => {
-			const latest = await got<any>('https://localhost:8001/my/stream/id/latest', {
+			const latest = await got<any>('https://localhost:9001/my/stream/id/latest', {
 				followRedirect: false,
 				https
 			})
 			expect(latest.headers['location']).toBeTruthy()
 			expect(latest.headers['location']).toMatch('https:')
-			expect(latest.headers['location']).toMatch(':8001')
+			expect(latest.headers['location']).toMatch(':9001')
 			expect(latest.headers['location']).toMatch('/my/stream/id')
 			expect(latest.headers['location']?.endsWith('/4')).toBe(true)
 
@@ -81,7 +81,7 @@ describe('Run a sequence of pull tests', () => {
 			expect(latest.headers['content-length']).toBe('0')
 		})
 		test('Pull the first value', async () => {
-			const value = await got('https://localhost:8001/my/stream/id/1', {
+			const value = await got('https://localhost:9001/my/stream/id/1', {
 				responseType: 'json',
 				https
 			})
@@ -92,7 +92,7 @@ describe('Run a sequence of pull tests', () => {
 			expect(value.headers['redioactive-nextid']).toBe('2')
 		})
 		test('Pull the end value', async () => {
-			const value = await got('https://localhost:8001/my/stream/id/4', {
+			const value = await got('https://localhost:9001/my/stream/id/4', {
 				responseType: 'json',
 				https
 			})
@@ -103,7 +103,7 @@ describe('Run a sequence of pull tests', () => {
 			expect(value.headers['redioactive-nextid']).toBe('4')
 		})
 		test('Get an empty manifest', async () => {
-			const manifest = await got('https://localhost:8001/my/stream/id/manifest.json', {
+			const manifest = await got('https://localhost:9001/my/stream/id/manifest.json', {
 				responseType: 'json',
 				https
 			})
@@ -112,15 +112,15 @@ describe('Run a sequence of pull tests', () => {
 			expect(manifest.headers['content-length']).toBe('2')
 		})
 		afterAll(async () => {
-			await got('https://localhost:8001/my/stream/id/end', { https })
+			await got('https://localhost:9001/my/stream/id/end', { https })
 			await wait(500)
 		})
 	})
 
 	describe('Set up a simple http pull stream of string', () => {
-		const port = 8001
+		const port = 9001
 		beforeAll(async () => {
-			redio(['one', 'two', 'three']).http('my/stream/id////', { httpsPort: 8001, serverOptions })
+			redio(['one', 'two', 'three']).http('my/stream/id////', { httpsPort: 9001, serverOptions })
 			// await wait(500)
 		})
 		test('Check debug info', async () => {
@@ -154,7 +154,7 @@ describe('Run a sequence of pull tests', () => {
 			expect(value.headers['redioactive-nextid']).toBe('2')
 		})
 		test('Pull the end value', async () => {
-			const value = await got('https://localhost:8001/my/stream/id/4', {
+			const value = await got('https://localhost:9001/my/stream/id/4', {
 				responseType: 'json',
 				https
 			})
@@ -180,7 +180,7 @@ describe('Run a sequence of pull tests', () => {
 	})
 
 	describe('Set up a simple http pull stream of json', () => {
-		const port = 8001
+		const port = 9001
 		beforeAll(async () => {
 			redio([{ one: 1 }, { two: 2 }, { three: 3 }]).http('my/stream/id2/', {
 				httpsPort: port,
@@ -255,7 +255,7 @@ describe('Run a sequence of pull tests', () => {
 			expect(value.headers['redioactive-nextid']).toBe('2')
 		})
 		test('Pull the end value', async () => {
-			const value = await got('https://localhost:8001/my/stream/id2/4', {
+			const value = await got('https://localhost:9001/my/stream/id2/4', {
 				responseType: 'json',
 				https
 			})
@@ -281,7 +281,7 @@ describe('Run a sequence of pull tests', () => {
 	})
 
 	describe('Set up a simple http pull stream of blobs', () => {
-		const port = 8001
+		const port = 9001
 		beforeAll(async () => {
 			redio([
 				{ one: 1, data: Buffer.from([1, 1, 1]) },
@@ -361,7 +361,7 @@ describe('Run a sequence of pull tests', () => {
 			expect(JSON.parse(redioDetails2 || '')).toEqual({ one: 1 })
 		})
 		test('Pull the end value', async () => {
-			const value = await got('https://localhost:8001/my/stream/id2/4', {
+			const value = await got('https://localhost:9001/my/stream/id2/4', {
 				responseType: 'buffer',
 				https
 			})
