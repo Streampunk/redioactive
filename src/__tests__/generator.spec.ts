@@ -190,3 +190,33 @@ describe('Generate, then consume later', () => {
 		await expect(endStr.toPromise()).resolves.toBeTruthy()
 	})
 })
+
+describe.only('Delayed generator start test', () => {
+	const wait = async (t: number): Promise<void> =>
+		new Promise((resolve) => {
+			setTimeout(resolve, t)
+		})
+	const makeGen = () => {
+		let counter = 0
+		return redio<number>(
+			async () => {
+				return counter < 6 ? counter++ : end
+			},
+			{ bufferSizeMax: 3, debug: false }
+		)
+	}
+	test('Start now', async () => {
+		const gen = makeGen()
+		await expect(gen.toArray()).resolves.toEqual([0, 1, 2, 3, 4, 5])
+	})
+	test('Start then - direct spout', async () => {
+		const gen = makeGen()
+		await wait(20)
+		await expect(gen.toArray()).resolves.toEqual([0, 1, 2, 3, 4, 5])
+	})
+	test('Start then - via valc', async () => {
+		const gen = makeGen()
+		await wait(20)
+		await expect(gen.map((x) => x).toArray()).resolves.toEqual([0, 1, 2, 3, 4, 5])
+	})
+})

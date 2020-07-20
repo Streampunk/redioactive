@@ -1197,6 +1197,7 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 				)
 			})
 		this._prev = prev
+		process.nextTick(() => this.next())
 	}
 
 	async next(): Promise<void> {
@@ -1343,6 +1344,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 				)
 			})
 		this._prev = prev
+		process.nextTick(() => this.next())
 	}
 
 	async next(): Promise<void> {
