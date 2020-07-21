@@ -1,6 +1,6 @@
 import { Spout, Liquid, HTTPOptions, literal, isNil, RedioEnd, isEnd } from './redio'
 import http, { Server, createServer, IncomingMessage, ServerResponse, STATUS_CODES } from 'http'
-import { Server as ServerS, createServer as createServerS } from 'https'
+import https, { Server as ServerS, createServer as createServerS, AgentOptions } from 'https'
 import { isError } from 'util'
 import { URL } from 'url'
 import { ProtocolType, BodyType, IdType, DeltaType } from './http-common'
@@ -87,6 +87,8 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 	let info: ConInfo
 	const url = new URL(uri, `http://localhost:${options.httpPort || options.httpsPort}`)
 	url.pathname = url.pathname.replace(/\/+/g, '/')
+	let protocol: typeof http | typeof https
+	let agent: http.Agent
 	if (url.pathname.endsWith('/')) {
 		url.pathname = url.pathname.slice(0, -1)
 	}
@@ -100,6 +102,13 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			manifest: {},
 			root: url.pathname
 		})
+		protocol = info.protocol === ProtocolType.http ? http : https
+		agent = new protocol.Agent(
+			Object.assign(
+				{ keepAlive: true, host: url.hostname },
+				(options && options.requestOptions) || {}
+			) as AgentOptions
+		)
 	} else {
 		let server: Server | undefined = undefined
 		let serverS: ServerS | undefined = undefined
@@ -529,8 +538,8 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					}
 				)
 				.then(() => {
-					const req = http.request(
-						{
+					const req = protocol.request(
+						Object.assign((options && options.requestOptions) || {}, {
 							hostname: url.hostname,
 							protocol: url.protocol,
 							port: url.port,
@@ -542,8 +551,9 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 								'Redioactive-DeltaType': info.delta,
 								'Redioactive-BufferSize': `${bufferSize}`,
 								'Redioactive-NextId': currentId // Defines the start
-							}
-						},
+							},
+							agent
+						}),
 						(res) => {
 							if (res.statusCode === 200 || res.statusCode === 201) {
 								resolve()
@@ -553,6 +563,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 								)
 							}
 							res.on('error', reject)
+							res.on('error', console.error)
 						}
 					)
 					if (options && options.cadence) {
@@ -572,8 +583,8 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					if (!sendBag) {
 						throw new Error('Redioactive: HTTP/S source: Could not find element to push.')
 					}
-					const req = http.request(
-						{
+					const req = protocol.request(
+						Object.assign((options && options.requestOptions) || {}, {
 							hostname: url.hostname,
 							protocol: url.protocol,
 							port: url.port,
@@ -583,8 +594,9 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 								'Redioactive-Id': sendBag.id,
 								'Redioactive-NextId': sendBag.nextId,
 								'Redioactive-PrevId': sendBag.prevId
-							}
-						},
+							},
+							agent
+						}),
 						(res) => {
 							// Received when all data is consumed
 							if (res.statusCode === 200 || res.statusCode === 201) {

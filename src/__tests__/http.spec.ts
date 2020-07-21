@@ -1,5 +1,6 @@
-import redio from '../redio'
+import redio, { Funnel, end, Liquid } from '../redio'
 import got from 'got'
+
 // import http from 'http'
 // import { ServerResponse } from 'http'
 // import { IncomingMessage } from 'http'
@@ -456,16 +457,32 @@ describe('Receive an HTTP push stream', () => {
 	describe('Receive a stream of primitive values', () => {
 		const port = 8005
 		let serverSide: Promise<number[]>
+		let clientSide: Promise<Liquid<number>>
+		let counter = 0
+		const genny: Funnel<number> = () =>
+			new Promise((resolve) => {
+				if (counter++ >= 3) {
+					resolve(end)
+				} else if (counter > 1) {
+					setTimeout(() => {
+						resolve(counter)
+					}, 200)
+				} else {
+					resolve(1)
+				}
+			})
 		beforeAll(async () => {
 			serverSide = redio<number>(`/my/stream/id`, { httpPort: port }).toArray()
-			await redio([1, 2, 3])
+			clientSide = redio<number>(genny)
 				.http(`http://localhost:${port}/my/stream/id`, {
 					httpPort: port,
-					manifest: { wibble: true, wobble: 'false' }
+					manifest: { wibble: true, wobble: 'false' },
+					keepAliveTimeout: 400
 				})
 				.toPromise()
 		})
 		test('Stream provides debug', async () => {
+			await wait(100)
 			const debugRes = await got(`http://localhost:${port}/my/stream/id/debug.json`, {
 				responseType: 'json'
 			})
@@ -496,13 +513,15 @@ describe('Receive an HTTP push stream', () => {
 			expect(manifest.headers['content-length']).toBeTruthy()
 		})
 		test('Stream arrives as expected', async () => {
+			await clientSide
 			await expect(serverSide).resolves.toEqual([1, 2, 3])
 		})
 		test('Server closes afterwards', async () => {
-			wait(500)
+			await wait(500)
 			await expect(
-				got(`http://localhost:${port}/my/stream/id/debug.json`, { timeout: 200 })
-			).rejects.toBeTruthy()
+				got(`http://localhost:${port}/my/stream/id/debug.json`, { retry: 0, timeout: 200 })
+			).rejects.toThrow(/Timeout/)
+			await wait(500)
 		})
 	})
 
@@ -512,7 +531,8 @@ describe('Receive an HTTP push stream', () => {
 		beforeAll(async () => {
 			serverSide = redio<Record<string, unknown>>(`/my/stream/id`, {
 				httpPort: port,
-				manifest: 'manifred'
+				manifest: 'manifred',
+				keepAliveTimeout: 400
 			}).toArray()
 			await redio([{ one: 1 }, { two: 'two' }, { three: [1, 'plus', { two: true }] }])
 				.http(`http://localhost:${port}/my/stream/id`, {
@@ -529,10 +549,11 @@ describe('Receive an HTTP push stream', () => {
 			])
 		})
 		test('Server closes afterwards', async () => {
-			wait(500)
+			await wait(500)
 			await expect(
-				got(`http://localhost:${port}/my/stream/id/debug.json`, { timeout: 200 })
-			).rejects.toBeTruthy()
+				got(`http://localhost:${port}/my/stream/id/debug.json`, { retry: 0, timeout: 200 })
+			).rejects.toThrow(/Timeout/)
+			await wait(500)
 		})
 	})
 
@@ -542,7 +563,8 @@ describe('Receive an HTTP push stream', () => {
 		beforeAll(async () => {
 			serverSide = redio<Record<string, unknown>>(`/my/stream/id`, {
 				httpPort: port,
-				blob: 'data'
+				blob: 'data',
+				keepAliveTimeout: 400
 			}).toArray()
 			await redio([
 				{ one: 1, data: Buffer.from([1, 1, 1]) },
@@ -564,10 +586,11 @@ describe('Receive an HTTP push stream', () => {
 			])
 		})
 		test('Server closes afterwards', async () => {
-			wait(500)
+			await wait(500)
 			await expect(
-				got(`http://localhost:${port}/my/stream/id/debug.json`, { timeout: 200 })
-			).rejects.toBeTruthy()
+				got(`http://localhost:${port}/my/stream/id/debug.json`, { retry: 0, timeout: 200 })
+			).rejects.toThrow(/Timeout/)
+			await wait(500)
 		})
 	})
 })

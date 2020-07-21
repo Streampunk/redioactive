@@ -1,4 +1,4 @@
-import redio from '../redio'
+import redio, { Funnel, Liquid, end } from '../redio'
 import got from 'got'
 import { ServerOptions, RequestOptions } from 'https'
 import fs from 'fs'
@@ -20,11 +20,10 @@ const https = {
 }
 const requestOptions: RequestOptions = {
 	// For Node.js direct requests
-	ca: serverOptions.ca,
-	timeout: 400
+	ca: serverOptions.ca
 }
 
-describe('Run a sequence of pull tests', () => {
+describe.skip('Run a sequence of pull tests', () => {
 	wait(1)
 	describe('Set up a simple http pull stream of number', () => {
 		beforeAll(async () => {
@@ -395,7 +394,7 @@ describe('Run a sequence of pull tests', () => {
 	})
 })
 
-describe('Receive an HTTP pull stream', () => {
+describe.skip('Receive an HTTP pull stream', () => {
 	const port = 9002
 	describe('Receive a stream of primitive values', () => {
 		beforeAll(async () => {
@@ -508,6 +507,124 @@ describe('Receive an HTTP pull stream', () => {
 		})
 		afterAll(async () => {
 			await got(`https://localhost:${port}/my/stream/id/end`, { https })
+			await wait(500)
+		})
+	})
+})
+
+describe.only('Receive an HTTP push stream', () => {
+	describe.skip('Receive a stream of primitive values', () => {
+		const port = 9005
+		let serverSide: Promise<number[]>
+		let clientSide: Promise<Liquid<number>>
+		let counter = 0
+		const genny: Funnel<number> = () =>
+			new Promise((resolve) => {
+				if (counter++ >= 3) {
+					resolve(end)
+				} else if (counter > 1) {
+					setTimeout(() => {
+						resolve(counter)
+					}, 200)
+				} else {
+					resolve(1)
+				}
+			})
+		beforeAll(async () => {
+			serverSide = redio<number>(`/my/stream/id`, {
+				httpsPort: port,
+				serverOptions,
+				keepAliveTimeout: 400
+			}).toArray()
+			clientSide = redio<number>(genny)
+				.http(`https://localhost:${port}/my/stream/id`, {
+					httpsPort: port,
+					manifest: { wibble: true, wobble: 'false' },
+					requestOptions
+				})
+				.toPromise()
+		})
+		test('Stream provides debug', async () => {
+			await wait(100)
+			const debugRes = await got(`https://localhost:${port}/my/stream/id/debug.json`, {
+				responseType: 'json',
+				https
+			})
+			expect(debugRes.headers['content-type']).toBe('application/json')
+			expect(debugRes.headers['content-length']).toBeTruthy()
+			expect(debugRes.body).toMatchObject({
+				info: {
+					type: 'push',
+					protocol: 'https',
+					root: '/my/stream/id',
+					idType: 'counter',
+					body: 'primitive',
+					delta: 'one',
+					manifest: { wibble: true, wobble: 'false' },
+					httpsPort: port
+				},
+				uri: '/my/stream/id',
+				url: `https://localhost:${port}/my/stream/id`,
+				streamIDs: { '/my/stream/id': { httpsPort: port } }
+			})
+		})
+		test('Stream provides manifest', async () => {
+			const manifest = await got(`https://localhost:${port}/my/stream/id/manifest.json`, {
+				responseType: 'json',
+				https
+			})
+			expect(manifest.body).toEqual({ wibble: true, wobble: 'false' })
+			expect(manifest.headers['content-type']).toBe('application/json')
+			expect(manifest.headers['content-length']).toBeTruthy()
+		})
+		test('Stream arrives as expected', async () => {
+			await clientSide
+			await expect(serverSide).resolves.toEqual([1, 2, 3])
+		})
+		test('Server closes afterwards', async () => {
+			await wait(500)
+			await expect(
+				got(`https://localhost:${port}/my/stream/id/debug.json`, { https, retry: 0, timeout: 200 })
+			).rejects.toThrow(/Timeout/)
+			await wait(4000)
+		})
+	})
+
+	describe('Receive a stream of JSON', () => {
+		const port = 9006
+		let serverSide: Promise<Record<string, unknown>[]>
+		beforeAll(async () => {
+			serverSide = redio<Record<string, unknown>>(`/my/stream/id`, {
+				httpsPort: port,
+				manifest: 'manifred',
+				serverOptions,
+				keepAliveTimeout: 400
+			})
+				.doto(console.log)
+				.toArray()
+			await redio([{ one: 1 }, { two: 'two' }, { three: [1, 'plus', { two: true }] }])
+				.http(`https://localhost:${port}/my/stream/id`, {
+					httpsPort: port,
+					manifest: { wibble: true, wobble: 'false' },
+					requestOptions
+				})
+				.toPromise()
+				.then(() => {
+					console.log('Sending ending')
+				})
+		})
+		test('Stream arrives as expected', async () => {
+			await expect(serverSide).resolves.toEqual([
+				{ one: 1, manifred: { wibble: true, wobble: 'false' } },
+				{ two: 'two', manifred: { wibble: true, wobble: 'false' } },
+				{ three: [1, 'plus', { two: true }], manifred: { wibble: true, wobble: 'false' } }
+			])
+		})
+		test('Server closes afterwards', async () => {
+			await wait(500)
+			await expect(
+				got(`https://localhost:${port}/my/stream/id/debug.json`, { https, retry: 0, timeout: 200 })
+			).rejects.toThrow(/Timeout/)
 			await wait(500)
 		})
 	})

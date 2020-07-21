@@ -58,7 +58,10 @@ function noMatch(req: IncomingMessage, res: ServerResponse) {
 export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 	if (!options) throw new Error('HTTP options must be specified - for now.')
 	// Assume pull for now
-	const url = new URL(uri, `http://localhost:${options.httpPort || options.httpsPort}`)
+	const url = new URL(
+		uri,
+		`http${options.httpsPort ? 's' : ''}://localhost:${options.httpPort || options.httpsPort}`
+	)
 	let info: ConInfo
 	let nextExpectedId: string | number = -1
 	let pushResolver: (v?: Liquid<T> | PromiseLike<Liquid<T>> | undefined) => void
@@ -311,6 +314,7 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 			server = servers[options.httpPort]
 			if (!server) {
 				server = options.serverOptions ? createServer(options.serverOptions) : createServer()
+				server.keepAliveTimeout = (options && options.keepAliveTimeout) || 5000
 				servers[options.httpPort] = server
 				server.listen(options.httpPort, () => {
 					console.log(
@@ -323,31 +327,32 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 				// TODO interrupt and push error?
 				console.error(err)
 			})
-			if (options.httpsPort) {
-				if (options && !options.extraStreamRoot) {
-					streamIDs[root] = { httpPort: options.httpPort, httpsPort: options.httpsPort }
-				}
-				serverS = serversS[options.httpsPort]
-				if (!serverS) {
-					serverS = options.serverOptions ? createServerS(options.serverOptions) : createServerS()
-					serversS[options.httpsPort] = serverS
-					serverS.listen(options.httpsPort, () => {
-						console.log(
-							`Redioactive: HTTP/S source: HTTPS server push for stream ${root} listening on ${options.httpsPort}`
-						)
-					})
-				}
-				serverS.on('request', pushRequest)
-				serverS.on('error', (err) => {
-					// TODO interrupt and push error?
-					console.error(err)
+		}
+		if (options.httpsPort) {
+			if (options && !options.extraStreamRoot) {
+				streamIDs[root] = { httpPort: options.httpPort, httpsPort: options.httpsPort }
+			}
+			serverS = serversS[options.httpsPort]
+			if (!serverS) {
+				serverS = options.serverOptions ? createServerS(options.serverOptions) : createServerS()
+				serverS.keepAliveTimeout = (options && options.keepAliveTimeout) || 5000
+				serversS[options.httpsPort] = serverS
+				serverS.listen(options.httpsPort, () => {
+					console.log(
+						`Redioactive: HTTP/S source: HTTPS server push for stream ${root} listening on ${options.httpsPort}`
+					)
 				})
 			}
+			serverS.on('request', pushRequest)
+			serverS.on('error', (err) => {
+				// TODO interrupt and push error?
+				console.error(err)
+			})
 		}
 
 		info = literal<PushInfo>({
 			type: 'push',
-			protocol: ProtocolType.http,
+			protocol: url.protocol === 'https:' ? ProtocolType.https : ProtocolType.http,
 			root,
 			idType: IdType.counter,
 			body: BodyType.primitive,
@@ -368,6 +373,9 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 	} // end PUSH
 
 	function pushRequest(req: IncomingMessage, res: ServerResponse) {
+		// TODO make sure error processings works as expected
+		req.on('error', console.error)
+		res.on('error', console.error)
 		if (req.url && isPush(info)) {
 			let path = req.url.replace(/\/+/g, '/')
 			if (path.endsWith('/')) {
@@ -375,11 +383,11 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 			}
 			if (path.startsWith(info.root)) {
 				const id = path.slice(info.root.length + 1)
-				// console.log(
-				// 	`Processing ${req.method} with url ${
-				// 		req.url
-				// 	} and ${typeof id} id ${id}, expected ${nextExpectedId}`
-				// )
+				console.log(
+					`Processing ${req.method} with url ${
+						req.url
+					} and ${typeof id} id ${id}, expected ${nextExpectedId}`
+				)
 				if (req.method === 'POST') {
 					if (id === 'end') {
 						return endStream(req, res)
@@ -471,6 +479,7 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 										Object.prototype.hasOwnProperty.call(t, 'end') &&
 										(<Record<string, unknown>>t)['end'] === true
 									) {
+										console.log('This is the end my friend!')
 										pushResolver(end)
 										endStream(req)
 										res.statusCode = 200
