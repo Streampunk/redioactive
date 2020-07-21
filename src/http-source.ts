@@ -112,6 +112,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			server = servers[options.httpPort]
 			if (!server) {
 				server = options.serverOptions ? createServer(options.serverOptions) : createServer()
+				server.keepAliveTimeout = (options && options.keepAliveTimeout) || 5000
 				servers[options.httpPort] = server
 				server.listen(options.httpPort, () => {
 					console.log(
@@ -132,6 +133,7 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 			serverS = serversS[options.httpsPort]
 			if (!serverS) {
 				serverS = options.serverOptions ? createServerS(options.serverOptions) : createServerS()
+				serverS.keepAliveTimeout = (options && options.keepAliveTimeout) || 5000
 				serversS[options.httpsPort] = serverS
 				serverS.listen(options.httpsPort, () => {
 					console.log(

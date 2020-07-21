@@ -1,7 +1,7 @@
 import { HTTPOptions, Funnel, Liquid, literal, end } from './redio'
 import { ProtocolType, IdType, DeltaType, BodyType } from './http-common'
 import http, { Server, createServer, IncomingMessage, ServerResponse } from 'http'
-import { Server as ServerS, createServer as createServerS } from 'https'
+import https, { Server as ServerS, createServer as createServerS, AgentOptions } from 'https'
 import { URL } from 'url'
 import { promises as dns } from 'dns'
 
@@ -93,6 +93,13 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 			initError = reject
 		})
 		let [starter, manifestly] = [false, false]
+		const protocol = info.protocol === ProtocolType.http ? http : https
+		const agent = new protocol.Agent(
+			Object.assign(
+				{ keepAlive: true, host: url.hostname },
+				(options && options.requestOptions) || {}
+			) as AgentOptions
+		)
 		dns
 			.lookup(url.hostname)
 			.then(
@@ -104,14 +111,15 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 				}
 			)
 			.then(() => {
-				const startReq = http.request(
-					{
+				const startReq = protocol.request(
+					Object.assign((options && options.requestOptions) || {}, {
 						hostname: url.hostname,
 						protocol: url.protocol,
 						port: url.port,
 						path: `${info.root}/start`,
-						method: 'GET'
-					},
+						method: 'GET',
+						agent
+					}),
 					(res) => {
 						const location = res.headers['location']
 						if (res.statusCode !== 302 || location === undefined) {
@@ -147,14 +155,15 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 				startReq.on('error', initError)
 				startReq.end()
 
-				const maniReq = http.request(
-					{
+				const maniReq = protocol.request(
+					Object.assign((options && options.requestOptions) || {}, {
 						hostname: url.hostname,
 						protocol: url.protocol,
 						port: url.port,
 						path: `${info.root}/manifest.json`,
-						method: 'GET'
-					},
+						method: 'GET',
+						agent
+					}),
 					(res) => {
 						if (res.statusCode !== 200 || res.headers['content-type'] !== 'application/json') {
 							throw new Error(
@@ -191,14 +200,15 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 				// 5. Get ready for the next pull or detect end
 				// 6. resolve
 				initialized.then(() => {
-					const valueReq = http.request(
-						{
+					const valueReq = protocol.request(
+						Object.assign((options && options.requestOptions) || {}, {
 							hostname: url.hostname,
 							protocol: url.protocol,
 							port: url.port,
 							path: `${info.root}/${nextId.toString()}`,
-							method: 'GET'
-						},
+							method: 'GET',
+							agent
+						}),
 						(res) => {
 							if (res.statusCode !== 200) {
 								throw new Error(

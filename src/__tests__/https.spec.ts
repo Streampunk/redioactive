@@ -1,6 +1,6 @@
 import redio from '../redio'
 import got from 'got'
-import { ServerOptions } from 'https'
+import { ServerOptions, RequestOptions } from 'https'
 import fs from 'fs'
 
 function wait(t: number): Promise<void> {
@@ -9,17 +9,23 @@ function wait(t: number): Promise<void> {
 	})
 }
 
+const serverOptions: ServerOptions = {
+	key: fs.readFileSync(__dirname + '/security/server-key.pem'),
+	cert: fs.readFileSync(__dirname + '/security/server-crt.pem'),
+	ca: fs.readFileSync(__dirname + '/security/ca-crt.pem')
+}
+const https = {
+	// For got
+	certificateAuthority: serverOptions.ca
+}
+const requestOptions: RequestOptions = {
+	// For Node.js direct requests
+	ca: serverOptions.ca,
+	timeout: 400
+}
+
 describe('Run a sequence of pull tests', () => {
 	wait(1)
-	const serverOptions: ServerOptions = {
-		key: fs.readFileSync(__dirname + '/security/server.key'),
-		cert: fs.readFileSync(__dirname + '/security/server.cert'),
-		rejectUnauthorized: false
-	}
-	const https = {
-		key: serverOptions.key,
-		certificateAuthority: serverOptions.cert
-	}
 	describe('Set up a simple http pull stream of number', () => {
 		beforeAll(async () => {
 			redio([1, 2, 3]).http('/my/stream/id', { httpsPort: 9001, serverOptions })
@@ -384,6 +390,124 @@ describe('Run a sequence of pull tests', () => {
 		})
 		afterAll(async () => {
 			await got(`https://localhost:${port}/my/stream/id2/end`, { https })
+			await wait(500)
+		})
+	})
+})
+
+describe('Receive an HTTP pull stream', () => {
+	const port = 9002
+	describe('Receive a stream of primitive values', () => {
+		beforeAll(async () => {
+			redio([1, 2, 3]).http('/my/stream/id', {
+				httpsPort: port,
+				manifest: { wibble: true, wobble: 'false' },
+				serverOptions,
+				keepAliveTimeout: 400
+			})
+			// await wait(500)
+		})
+		test('Create a redio HTTP stream consumer', async () => {
+			await expect(
+				redio<number>(`https://localhost:${port}/my/stream/id`, {
+					httpsPort: port,
+					requestOptions
+				}).toArray()
+			).resolves.toEqual([1, 2, 3])
+		})
+		afterAll(async () => {
+			await got(`https://localhost:${port}/my/stream/id/end`, { https })
+			await wait(500)
+		})
+	})
+
+	describe('Receive a stream of JSON', () => {
+		beforeAll(async () => {
+			redio([{ one: 1 }, { two: 'two' }, { three: [1, 'plus', { two: true }] }]).http(
+				'/my/stream/id',
+				{
+					httpsPort: port,
+					manifest: { wibble: true, wobble: 'false' },
+					serverOptions,
+					keepAliveTimeout: 400
+				}
+			)
+		})
+		test('Create a redio HTTP stream consumer', async () => {
+			await expect(
+				redio<number>(`https://localhost:${port}/my/stream/id`, {
+					httpsPort: port,
+					requestOptions
+				}).toArray()
+			).resolves.toEqual([{ one: 1 }, { two: 'two' }, { three: [1, 'plus', { two: true }] }])
+		})
+		afterAll(async () => {
+			await got(`https://localhost:${port}/my/stream/id/end`, { https })
+			await wait(500)
+		})
+	})
+
+	describe('Receive a stream of blobs', () => {
+		beforeAll(async () => {
+			redio([
+				{ one: 1, data: Buffer.from([1, 1, 1]) },
+				{ two: 'two', data: Buffer.from([2, 2, 2]) },
+				{ three: [1, 'plus', { two: true }], data: Buffer.from([3, 3, 3]) }
+			]).http('/my/stream/id', {
+				httpsPort: port,
+				manifest: { wibble: true, wobble: 'false' },
+				blob: 'data',
+				serverOptions,
+				keepAliveTimeout: 400
+			})
+			// await wait(500)
+		})
+		test('Create a redio HTTP stream consumer', async () => {
+			await expect(
+				redio<number>(`https://localhost:${port}/my/stream/id`, {
+					httpsPort: port,
+					blob: 'dematerial',
+					requestOptions
+				}).toArray()
+			).resolves.toEqual([
+				{ one: 1, dematerial: Buffer.from([1, 1, 1]) },
+				{ two: 'two', dematerial: Buffer.from([2, 2, 2]) },
+				{ three: [1, 'plus', { two: true }], dematerial: Buffer.from([3, 3, 3]) }
+			])
+		})
+		afterAll(async () => {
+			await got(`https://localhost:${port}/my/stream/id/end`, { https })
+			await wait(500)
+		})
+	})
+
+	describe('Receive a manifest', () => {
+		beforeAll(async () => {
+			redio([{ one: 1 }, { two: 'two' }, { three: [1, 'plus', { two: true }] }]).http(
+				'/my/stream/id',
+				{
+					httpsPort: port,
+					manifest: { wibble: true, wobble: 'false' },
+					serverOptions,
+					keepAliveTimeout: 400
+				}
+			)
+		})
+		test('Create a redio HTTP stream consumer', async () => {
+			await expect(
+				redio<number>(`https://localhost:${port}/my/stream/id`, {
+					httpsPort: port,
+					manifest: 'manifred',
+					requestOptions
+				}).toArray()
+			).resolves.toEqual([
+				{ one: 1, manifred: { wibble: true, wobble: 'false' } },
+				{ two: 'two', manifred: { wibble: true, wobble: 'false' } },
+				{ three: [1, 'plus', { two: true }], manifred: { wibble: true, wobble: 'false' } }
+			])
+		})
+		afterAll(async () => {
+			await got(`https://localhost:${port}/my/stream/id/end`, { https })
 			await wait(500)
 		})
 	})

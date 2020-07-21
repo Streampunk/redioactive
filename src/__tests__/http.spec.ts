@@ -348,7 +348,8 @@ describe('Receive an HTTP pull stream', () => {
 		beforeAll(async () => {
 			redio([1, 2, 3]).http('/my/stream/id', {
 				httpPort: port,
-				manifest: { wibble: true, wobble: 'false' }
+				manifest: { wibble: true, wobble: 'false' },
+				keepAliveTimeout: 400
 			})
 			// await wait(500)
 		})
@@ -369,7 +370,8 @@ describe('Receive an HTTP pull stream', () => {
 				'/my/stream/id',
 				{
 					httpPort: port,
-					manifest: { wibble: true, wobble: 'false' }
+					manifest: { wibble: true, wobble: 'false' },
+					keepAliveTimeout: 400
 				}
 			)
 			// await wait(500)
@@ -396,7 +398,8 @@ describe('Receive an HTTP pull stream', () => {
 			]).http('/my/stream/id', {
 				httpPort: port,
 				manifest: { wibble: true, wobble: 'false' },
-				blob: 'data'
+				blob: 'data',
+				keepAliveTimeout: 400
 			})
 			// await wait(500)
 		})
@@ -424,7 +427,8 @@ describe('Receive an HTTP pull stream', () => {
 				'/my/stream/id',
 				{
 					httpPort: port,
-					manifest: { wibble: true, wobble: 'false' }
+					manifest: { wibble: true, wobble: 'false' },
+					keepAliveTimeout: 400
 				}
 			)
 			// await wait(500)

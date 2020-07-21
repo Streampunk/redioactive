@@ -17,6 +17,7 @@ import { Readable } from 'stream'
 import { ReadStream } from 'fs'
 import { ServerOptions } from 'https'
 import { httpTarget } from './http-target'
+import { RequestOptions } from 'https'
 const { isPromise } = types
 
 /** Type of a value sent down a stream to indicate that it has ended. No values
@@ -257,10 +258,13 @@ export interface HTTPOptions extends RedioOptions {
 	httpPort?: number
 	/** HTTPS port to use for pull or push. Default is 8766. Set to `-1` to disable.  */
 	httpsPort?: number
-	/** Options required to create an HTTP/S server. For HTTPS, include the `key and
-	 *  `cert` properties.
+	/** Options required to create an HTTP/S server. For HTTPS, include the `key and `cert` properties. For
+	 *  self-signed certificates used during testing, set `rejectUnauthorized` to `false`.
 	 */
 	serverOptions?: ServerOptions
+	/** Additional options required to make HTTP/S requests, such as keys and certificates.
+	 */
+	requestOptions?: RequestOptions
 	/** Append the first value of the named property of type `T` to complete the stream
 	 *  root path, e.g. if the URI contains `/fred/ginger` and the property of `T` called
 	 *  _extraStreamRoot_ has value `streamId` with value `audio/channel3`, the full stream
@@ -331,6 +335,11 @@ export interface HTTPOptions extends RedioOptions {
 	 *  value is produced within the time interval or a 404/410 response is generated.
 	 */
 	timeout?: number
+	/** Length of time an HTTP/S keep alive socket is kept open after a request. The default
+	 *  is 5000ms - which is normally fine - but may cause a delay in a Node.js process
+	 *  closing. Smaller values may be useful in testing.
+	 */
+	keepAliveTimeout?: number
 }
 
 /**
@@ -984,6 +993,10 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	sequence<S>(_options?: RedioOptions): RedioPipe<S> {
 		throw new Error('Not implemented')
 	}
+	// sequence<S, T extends RedioPipe<S>>(_options?: RedioOptions): RedioPipe<S> {
+	// 	let f: Funnel<S> = () => new Promise<LotsOfLiquid<S>>((resolve, reject) => {})
+	// 	return redio(f)
+	// }
 
 	series<S>(_options?: RedioOptions): RedioPipe<S> {
 		throw new Error('Not implemented')
@@ -1423,7 +1436,7 @@ function isReadableStream(x: any): x is Readable {
  * @param options  Optional configuration.
  * @returns Stream of values from the iterable provided.
  */
-export default function <T>(iterable: Iterable<T>, options?: RedioOptions): RedioPipe<T>
+export default function redio<T>(iterable: Iterable<T>, options?: RedioOptions): RedioPipe<T>
 /**
  *  Create a stream of values of type `T` using a lazy [[Generator]] function. A
  *  generator function receives callback functions `push` and `next` that it uses
@@ -1433,7 +1446,7 @@ export default function <T>(iterable: Iterable<T>, options?: RedioOptions): Redi
  *  @param options   Optional configuration.
  *  @return Stream of values _pushed_ by the generator.
  */
-export default function <T>(generator: Generator<T>, options?: RedioOptions): RedioPipe<T>
+export default function redio<T>(generator: Generator<T>, options?: RedioOptions): RedioPipe<T>
 /**
  * Create a stream from a [Node.js Readable stream](https://nodejs.org/docs/latest-v12.x/api/stream.html#stream_readable_streams).
  * Back pressure will be applied as required, slowing stream reading down to the acceptable
@@ -1444,7 +1457,10 @@ export default function <T>(generator: Generator<T>, options?: RedioOptions): Re
  * @typeparam T   Normally a `Buffer` or a `string`, but could be `any` in object mode.
  * @return Stream of values created by consuming a Node.JS stream.
  */
-export default function <T>(stream: Readable | ReadStream, options?: StreamOptions): RedioPipe<T>
+export default function redio<T>(
+	stream: Readable | ReadStream,
+	options?: StreamOptions
+): RedioPipe<T>
 /**
  * Create a stream from a [Node.js event emitter](https://nodejs.org/docs/latest-v12.x/api/events.html)
  * for a specific event name. So that the stream can eventually end, either the event emitter stops
@@ -1455,7 +1471,7 @@ export default function <T>(stream: Readable | ReadStream, options?: StreamOptio
  * @typeparam T     Type of values emitted by the first emitted argument.
  * @return Stream of values created as events of the given name are omitted.
  */
-export default function <T>(
+export default function redio<T>(
 	emitter: EventEmitter,
 	eventName: string,
 	options?: EventOptions
@@ -1467,7 +1483,7 @@ export default function <T>(
  *  @typeparam T   Type of values in the source array pushed onto the stream.
  *  @return Stream of values created from the array of data.
  */
-export default function <T>(data: Array<T | RedioNil>, options?: RedioOptions): RedioPipe<T>
+export default function redio<T>(data: Array<T | RedioNil>, options?: RedioOptions): RedioPipe<T>
 /**
  * Receive a stream of values of type `T` from another processing node over HTTP/S. This
  * is the partner to the [[RedioPipe.http]] method that creates such a stream. Back pressure
@@ -1480,7 +1496,7 @@ export default function <T>(data: Array<T | RedioNil>, options?: RedioOptions): 
  * @typeparam T   Type of values in the stream.
  * @return Stream of values received-as-pulled from the remote stream processor.
  */
-export default function <T>(url: string, options?: HTTPOptions): RedioPipe<T>
+export default function redio<T>(url: string, options?: HTTPOptions): RedioPipe<T>
 /**
  *  Create a stream of values of type `T` using a [[Funnel]] function, a _thunk_
  *  that is called every time the stream requires a new value. The _thunk_ maybe
@@ -1493,9 +1509,9 @@ export default function <T>(url: string, options?: HTTPOptions): RedioPipe<T>
  *  @typeparam T   Type of values in the stream.
  *  @return Stream of values created by repeatedly calling the funnel function.
  */
-export default function <T>(funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T>
+export default function redio<T>(funnel: Funnel<T>, options?: RedioOptions): RedioPipe<T>
 /** Implementation of the default stream generator function. Use an override. */
-export default function <T>(
+export default function redio<T>(
 	args1: Funnel<T> | string | Array<T> | EventEmitter | Readable | Generator<T> | Iterable<T>,
 	args2?: RedioOptions | StreamOptions | HTTPOptions | string,
 	args3?: EventOptions
