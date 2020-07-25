@@ -395,12 +395,23 @@ export interface RedioPipe<T> extends PipeFitting {
 	// Transforms
 	/**
 	 *  Append a value to the end of a stream.
-	 *      redio([1, 2, 3]).append(4) // => 1, 2, 3, 4
+	 *  ```typescript
+	 *  redio([1, 2, 3]).append(4) // => 1, 2, 3, 4
+	 *  ```
 	 *  @param v       Value to append to end of stream.
 	 *  @param options Optional configuration.
 	 *  @returns Pipe containing stream with the additional element.
 	 */
 	append(v: T | RedioEnd | Promise<T>, options?: RedioOptions): RedioPipe<T>
+	/**
+	 * Takes a stream and batches incoming data into arrays of the given length.
+	 * ```typescript
+	 * redio([1, 2, 3, 4, 5]).batch(2) // => [1, 2], [3, 4], [5]
+	 * ```
+	 * @param n       Length of each batch.
+	 * @param options Optional configuration.
+	 * @returns Batches of values from the input stream.
+	 */
 	batch(n: Promise<number> | number, options?: RedioOptions): RedioPipe<Array<T>>
 	collect(options?: RedioOptions): RedioPipe<Array<T>>
 	compact(options?: RedioOptions): RedioPipe<T>
@@ -559,8 +570,12 @@ export interface RedioPipe<T> extends PipeFitting {
 		options?: RedioOptions
 	): RedioStream<T>
 	/**
-	 *  Consume the stream by writing each value into an array, the resolving
-	 *  to that array.
+	 *  Consume the stream by writing each value into an array, then resolving
+	 *  to that array when the stream ends. Any error in the pipeline will cause
+	 *  the result to reject.
+	 *  ```typescript
+	 *  redio(new Set([1, 2, 3])).toArray() // [1, 2, 3]
+	 *  ```
 	 *  @param options Optional configuration.
 	 *  @returns Promise to create an array containing the final values of the stream.
 	 */
@@ -727,8 +742,26 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}, options)
 	}
 
-	batch(_n: Promise<number> | number, _options?: RedioOptions): RedioPipe<Array<T>> {
-		throw new Error('Not implemented')
+	batch(n: Promise<number> | number, options?: RedioOptions): RedioPipe<Array<T>> {
+		let batcher: Array<T> = []
+		const num = isPromise(n) ? n : Promise.resolve(n)
+		return this.valve<Array<T>>(async (t: T | RedioEnd) => {
+			const maxLength = await num
+			if (maxLength < 1) {
+				throw new Error('Batch length must be greater than 0')
+			}
+			if (isEnd(t)) {
+				return batcher.length === 0 ? end : batcher
+			}
+			batcher.push(t)
+			if (batcher.length >= maxLength) {
+				const singleBatch = batcher
+				batcher = []
+				return singleBatch
+			} else {
+				return nil
+			}
+		}, options)
 	}
 
 	collect(_options?: RedioOptions): RedioPipe<Array<T>> {
@@ -1091,14 +1124,16 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 
 	async toArray(options?: RedioOptions): Promise<Array<T>> {
 		const result: Array<T> = []
-		const promisedArray: Promise<Array<T>> = new Promise((resolve, _reject) => {
-			this.spout((tt: Liquid<T>) => {
+		const promisedArray: Promise<Array<T>> = new Promise((resolve, reject) => {
+			const sp = this.spout((tt: Liquid<T>) => {
 				if (isEnd(tt)) {
 					resolve(result)
 				} else {
 					isValue(tt) && result.push(tt)
 				}
 			}, options)
+			sp.catch(reject)
+			return sp
 		})
 		return promisedArray
 	}
@@ -1352,6 +1387,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 					},
 					(err?: unknown): void => {
 						// this._ready = true
+						console.log('Sinker reject')
 						reject(err as unknown | undefined)
 					}
 				)
