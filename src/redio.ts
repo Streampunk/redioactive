@@ -432,11 +432,54 @@ export interface RedioPipe<T> extends PipeFitting {
 	 * @returns Stream containing only truthy values.
 	 */
 	compact(options?: RedioOptions): RedioPipe<T>
+	/**
+	 * Function that consumes values from the incoming stream and - using callbacks -
+	 * produces zero, one or more values (or Errors) on an output stream. With this toolkit
+	 * function, it is possible to contruct other higher-order [[Valve|valves]] using
+	 * callbacks.
+	 * Note that redioactive prefers the use of promises over callbacks. Conider using
+	 * [[RedioPipe.valve]] instead.
+	 * The function takes:
+	 * * `err` An error if the next value in the stream is an error, or `null`.
+	 * * `x` A value if the next value to flow down the stream is a value, the stream
+	 *   [[RedioEnd|end]] or `null`.
+	 * * `push` - Call this when it is time to produce a value, error or end.
+	 * * `next` - Call this when ready to receive the next value.
+	 *
+	 * @param f Function that takes an error, a value, a push function and a next function.
+	 * @param options Ooptional parameters.
+	 * @returns Stream created with the function and its use of the callbacks.
+	 */
 	consume<M>(
-		f: (err: Error, x: T, push: (m: Liquid<M>) => void, next: () => void) => Promise<void> | void,
+		f: (
+			err: Error | null,
+			x: T | RedioEnd | null,
+			push: (m: Liquid<M>) => void,
+			next: () => void
+		) => void,
 		options?: RedioOptions
 	): RedioPipe<M>
 	debounce(ms: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
+	/**
+	 * Execute a function on each value of the stream, emitting the value onto the output
+	 * stream. This is useful to take side-effect action such as logging and can be used to
+	 * make side-effect modifications to objects in the stream. Errors are not passed to the
+	 * function.
+	 * Note that although the function can return a promise, it does not wait for that promise
+	 * to resolve or apply any back pressure.
+	 * ```typescript
+	 * redio([1, 2, 3]).doto(console.log).each(() => {})
+	 * // 1
+	 * // 2
+	 * // 3
+	 *
+	 * // Mutating values by side-effect - use with caution!
+	 * redio([[1], [2], [3]]).doto(x => x.push(1)).toArray() // [[1, 1], [2, 1], [3, 1]]
+	 * ```
+	 * @param f       Function to apply to each value of the stream.
+	 * @param options Optional parameters.
+	 * @returns Stream containing the same values as the input stream.
+	 */
 	doto(f: (t: T) => Promise<void> | void, options?: RedioOptions): RedioPipe<T>
 	/**
 	 *  Ignores the first `num` values of the stream and emits the rest.
@@ -814,10 +857,63 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	}
 
 	consume<M>(
-		_f: (err: Error, x: T, push: (m: Liquid<M>) => void, next: () => void) => Promise<void> | void,
-		_options?: RedioOptions
+		f: (
+			err: Error | null,
+			x: T | RedioEnd | null,
+			push: (m: Liquid<M>) => void,
+			next: () => void
+		) => Promise<void> | void,
+		options?: RedioOptions
 	): RedioPipe<M> {
-		throw new Error('Not implemented')
+		let genResolve:
+			| ((v?: M | RedioEnd | RedioNil | PromiseLike<M> | undefined) => void)
+			| null = null
+		let genReject: ((reason?: any) => void) | null = null
+		const pending: Array<Liquid<M>> = []
+		const genny: Funnel<M> = () =>
+			new Promise((resolve, reject) => {
+				if (pending.length > 0) {
+					const value = pending.shift()
+					if (isAnError(value)) {
+						reject(value)
+					} else {
+						resolve(value)
+					}
+					return
+				}
+				genResolve = (m?: M | RedioEnd | RedioNil | PromiseLike<M> | undefined) => {
+					genResolve = null
+					genReject = null
+					resolve(m)
+				}
+				genReject = (reason?: any) => {
+					genResolve = null
+					genReject = null
+					reject(reason)
+				}
+			})
+		this.spout(
+			(t: Liquid<T>) =>
+				new Promise<void>((resolve, _reject) => {
+					const push: (m: Liquid<M>) => void = (m: Liquid<M>) => {
+						if (isAnError(m)) {
+							if (genReject) {
+								genReject(m)
+							} else {
+								pending.push(m)
+							}
+						} else {
+							if (genResolve) {
+								genResolve(m)
+							} else {
+								pending.push(m)
+							}
+						}
+					}
+					f((isAnError(t) && t) || null, ((isValue(t) || isEnd(t)) && t) || null, push, resolve)
+				})
+		)
+		return redio(genny, options)
 	}
 
 	debounce(_ms: Promise<number> | number, _options?: RedioOptions): RedioPipe<T> {
