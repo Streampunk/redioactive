@@ -1,6 +1,5 @@
 import redio from '../redio'
 
-/* Example tests - for now */
 describe('Appending values to stream', () => {
 	test('Appends a single value', async () => {
 		await expect(redio([1, 2, 3]).append(4).toArray()).resolves.toEqual([1, 2, 3, 4])

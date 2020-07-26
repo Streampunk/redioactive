@@ -413,7 +413,24 @@ export interface RedioPipe<T> extends PipeFitting {
 	 * @returns Batches of values from the input stream.
 	 */
 	batch(n: Promise<number> | number, options?: RedioOptions): RedioPipe<Array<T>>
+	/**
+	 * Group all the values of the incoming stream into and single array. Works like
+	 * [[toArray | `toArray()`]] but part way along the pipe as a valve.
+	 * ```typescript
+	 * redio(new Set([1, 2, 3])).collect().toArray() // [[1, 2, 3]] - single element
+	 * ```
+	 * @param options Optional parameters.
+	 * @return Stream of collected values made by consuming the complete input stream.
+	 */
 	collect(options?: RedioOptions): RedioPipe<Array<T>>
+	/**
+	 * Removes all non-truthy values from a stream.
+	 * ```typescript
+	 * redio([1, null, 2, undefined, 0, '', 3]).toArray() // [1, 2, 3]
+	 * ```
+	 * @param options Optional configuration.
+	 * @returns Stream containing only truthy values.
+	 */
 	compact(options?: RedioOptions): RedioPipe<T>
 	consume<M>(
 		f: (err: Error, x: T, push: (m: Liquid<M>) => void, next: () => void) => Promise<void> | void,
@@ -764,12 +781,36 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}, options)
 	}
 
-	collect(_options?: RedioOptions): RedioPipe<Array<T>> {
-		throw new Error('Not implemented')
+	collect(options?: RedioOptions): RedioPipe<Array<T>> {
+		const result: Array<T> = []
+		let ended = false
+		const genny: Funnel<Array<T>> = () =>
+			new Promise((resolve, reject) => {
+				if (ended) resolve(end)
+				this.spout((t: Liquid<T>) => {
+					if (isEnd(t)) {
+						resolve(result)
+						ended = true
+					} else if (isAnError(t)) {
+						reject(t)
+					} else {
+						isValue(t) && result.push(t)
+					}
+				})
+			})
+		return redio(genny, options)
 	}
 
-	compact(_options?: RedioOptions): RedioPipe<T> {
-		throw new Error('Not implemented')
+	compact(options: RedioOptions): RedioPipe<T> {
+		return this.valve((t: T | RedioEnd) => {
+			if (isEnd(t)) {
+				return end
+			} else if (t) {
+				return t
+			} else {
+				return nil
+			}
+		}, options)
 	}
 
 	consume<M>(
@@ -1387,7 +1428,6 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 					},
 					(err?: unknown): void => {
 						// this._ready = true
-						console.log('Sinker reject')
 						reject(err as unknown | undefined)
 					}
 				)
