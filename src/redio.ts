@@ -519,22 +519,26 @@ export interface RedioPipe<T> extends PipeFitting {
 	 */
 	drop(num?: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
 	/**
-	 *  Apply the given function to every error in the stream. All other values
-	 *  are passed on. The error can be transformed into a value of the stream
-	 *  type, passed on or dropped by returning / resolving to `void`/`null`/`undefined`.
-	 *  @param f       Function to transform an error into a value or take a side-effect
-	 *                 action. Note that errors can be passed on (return type `Error`)
-	 *                 or dropped (return type `RedioNil` or equivalent falsy value).
-	 *  @param options Optional configuration. Note the `processError` will always be set.
-	 *  @returns Stream of values with errors handled.
-	 */
-	errors(f: (err: Error) => Promise<Liquid<T>> | Liquid<T>, options?: RedioOptions): RedioPipe<T>
-	/**
-	 *  Apply the given filter function to all the values in the stream, keeping
-	 *  those that pass the test.
-	 *  ```typescript
+	 * Apply the given function to every error in the stream. All other values
+	 * are passed on. The error can be transformed into a value of the stream
+	 * type, passed on or dropped by returning / resolving to `void`/`null`/`undefined`.
 	 *
-	 *  ```
+	 * @param f       Function to transform an error into a value or take a side-effect
+	 *                action. Note that errors can be passed on (return type `Error`)
+	 *                or dropped (return type `RedioNil` or equivalent falsy value).
+	 * @param options Optional configuration. Note the `processError` will always be set.
+	 * @returns Stream of values with errors handled.
+	 */
+	errors(
+		f: (err: Error) => Promise<Liquid<T>> | Liquid<T> | void,
+		options?: RedioOptions
+	): RedioPipe<T>
+	/**
+	 * Apply the given filter function to all the values in the stream, keeping
+	 * those that pass the test.
+	 * ```typescript
+	 * redio([1, 2, 3, 4, 5, 6]).filter(x => x % 2 === 0) // [2, 4, 6]
+	 * ```
 	 *  @param filter  Function returning true for values to keep.
 	 *  @param options Optional configuration.
 	 *  @returns Stream of values that pass the test.
@@ -1012,7 +1016,10 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}, options)
 	}
 
-	errors(f: (err: Error) => Promise<Liquid<T>> | Liquid<T>, options?: RedioOptions): RedioPipe<T> {
+	errors(
+		f: (err: Error) => Promise<Liquid<T>> | Liquid<T> | void,
+		options?: RedioOptions
+	): RedioPipe<T> {
 		if (options) {
 			options.processError = true
 		} else {
@@ -1399,7 +1406,7 @@ class RedioStart<T> extends RedioProducer<T> {
 					process.nextTick(() => this.next())
 				}
 			} catch (err) {
-				this.push(err)
+				this.push(isAnError(err) ? err : new Error(err.toString()))
 				process.nextTick(() => this.next())
 			}
 		}
@@ -1493,7 +1500,7 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 						}
 					}
 				} catch (err) {
-					this.push(err)
+					this.push(isAnError(err) ? err : new Error(err.toString()))
 				} finally {
 					if (this._debug) {
 						console.log('About to call next in', this.fittingId)
@@ -1515,20 +1522,27 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
  */
 export interface RedioStream<T> extends PipeFitting {
 	/**
-	 *  Provide a callback function that is run when the stream has ended. The
-	 *  function may be used to close any resources no longer reauired.
-	 *  If more than one done function is provided, the latest one is called.
+	 * Provide a callback function that is run when the stream has ended. The
+	 * function may be used to close any resources no longer reauired.
+	 * If more than one done function is provided, the latest one is called.
+	 * ```typescript
+	 * redio([1, 2, 3]).each(console.log).done(() => { console.log('The END!') })
+	 * // 1
+	 * // 2
+	 * // 3
+	 * // The END!
+	 * ```
 	 *  @param thatsAllFolks Function called at the end of the stream.
 	 *  @returns This stream so that other end-stream behaviour can be specified.
 	 */
 	done(thatsAllFolks: () => void): RedioStream<T>
 	/**
-	 *  Function that is called with any unhandled errors that have caysed the
-	 *  stream to end. If more than one catch function is provided, the latest one
-	 *  is called.
-	 *  @param errFn Funciion called with any unhandled error that has reached the
-	 *               end of the stream.
-	 *  @returns This stream so that other end-stream behaviour can be specified.
+	 * Function that is called with any unhandled errors that have caysed the
+	 * stream to end. If more than one catch function is provided, the latest one
+	 * is called.
+	 * @param errFn Function called with any unhandled error that has reached the
+	 *              end of the stream.
+	 * @returns This stream so that other end-stream behaviour can be specified.
 	 */
 	catch(errFn: (err: Error) => void): RedioStream<T>
 	/**
@@ -1552,6 +1566,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 	private _resolve: ((t: Liquid<T>) => void) | null = null
 	private _reject: ((err: unknown) => void) | null = null
 	private _last: Liquid<T> = nil
+	private _compoundError: Array<Error> = []
 
 	constructor(prev: RedioProducer<T>, sinker: ErrorSpout<T>, options?: RedioOptions) {
 		super()
@@ -1583,8 +1598,18 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 							if (this._thatsAllFolks) {
 								this._thatsAllFolks()
 							}
-							if (this._resolve) {
-								this._resolve(this._last)
+							if (this._resolve && this._reject) {
+								if (this._compoundError.length > 0) {
+									this._reject(
+										new Error(
+											`Errors occurred during stream:\n${this._compoundError
+												.map((x) => x.message)
+												.join('\n')}`
+										)
+									)
+								} else {
+									this._resolve(this._last)
+								}
 							}
 						}
 						this._last = t
@@ -1611,13 +1636,16 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 					await this._sinker(v)
 				} catch (err) {
 					let handled = false
+					const latestError = isAnError(err) ? err : new Error(err.toString())
 					if (this._errorFn) {
 						handled = true
-						this._errorFn(err)
+						// console.log('Calling error function', err)
+						this._errorFn(latestError)
 					}
 					if (this._reject) {
 						handled = true
-						this._reject(err)
+						// console.log('Adding to error list', err)
+						this._compoundError.push(latestError)
 					}
 					if (!handled) {
 						if (this._debug || !this._rejectUnhandled) {

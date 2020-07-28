@@ -1,0 +1,19 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.3.0",
+	"configurations": [
+		{
+			"type": "node",
+			"request": "launch",
+			"name": "Jest test errors",
+			"args": ["-i", "errors"],
+			"program": "${workspaceRoot}\\node_modules\\jest\\bin\\jest.js",
+			"internalConsoleOptions": "openOnSessionStart",
+			// "preLaunchTask": "tsc: build - tsconfig.json",
+			"outFiles": ["${workspaceRoot}/**/*"],
+			"envFile": "${workspaceRoot}/.env"
+		}
+	]
+}
