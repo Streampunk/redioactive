@@ -794,7 +794,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 					console.log(`Resuming in pull for fitting ${this.fittingId}.`)
 				}
 				this._paused = false
-				this._followers.forEach((follower) => follower.next())
+				process.nextTick(() => this._followers.forEach((follower) => follower.next()))
 			}
 		} else {
 			val = provideVal ? this._buffer[0] : undefined
