@@ -521,12 +521,13 @@ export interface RedioPipe<T> extends PipeFitting {
 	/**
 	 * Apply the given function to every error in the stream. All other values
 	 * are passed on. The error can be transformed into a value of the stream
-	 * type, passed on or dropped by returning / resolving to `void`/`null`/`undefined`.
+	 * type, passed on or dropped by returning / resolving to [[RedioNil|`nil`]]/`void`/`null`/`undefined`.
 	 *
 	 * @param f       Function to transform an error into a value or take a side-effect
 	 *                action. Note that errors can be passed on (return type `Error`)
-	 *                or dropped (return type `RedioNil` or equivalent falsy value).
-	 * @param options Optional configuration. Note the `processError` will always be set.
+	 *                or dropped (return type [[RedioNil]] or an equivalent falsy value).
+	 * @param options Optional configuration. Note the [[RedioOptions.processError|`processError`]]
+	 *                will always be set.
 	 * @returns Stream of values with errors handled.
 	 */
 	errors(
@@ -535,7 +536,7 @@ export interface RedioPipe<T> extends PipeFitting {
 	): RedioPipe<T>
 	/**
 	 * Apply the given filter function to all the values in the stream, keeping
-	 * those that pass the test.
+	 * only those that pass the test.
 	 * ```typescript
 	 * redio([1, 2, 3, 4, 5, 6]).filter(x => x % 2 === 0) // [2, 4, 6]
 	 * ```
@@ -544,6 +545,18 @@ export interface RedioPipe<T> extends PipeFitting {
 	 *  @returns Stream of values that pass the test.
 	 */
 	filter(filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
+	/**
+	 * Find the first value in the stream that passes the given filter test, then end the
+	 * output stream.
+	 * ```typescript
+	 * const docs = [{ name: 'one', value: 1 }, { name: 'two', value: 2 },
+	 *   { name: 'three', value: 3 }]
+	 * redio(docs).find(x => x.value >= 2) // { name: 'two', value: 2 }
+	 * ```
+	 * @param filter  Function testing positive for input values to be found.
+	 * @param options Optional configuration.
+	 * @returns Single-element stream with value that passes the filter test.
+	 */
 	find(filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
 	findWhere(props: Record<string, unknown>, options?: RedioOptions): RedioPipe<T>
 	group(f: string | ((t: T) => unknown), options?: RedioOptions): RedioPipe<T>
@@ -553,11 +566,20 @@ export interface RedioPipe<T> extends PipeFitting {
 	last(options?: RedioOptions): RedioPipe<T>
 	latest(options?: RedioOptions): RedioPipe<T>
 	/**
-	 *  Transform a stream by applying the given `mapper` function to each element.
-	 *  @typeparam M Type of the values in the output stream.
-	 *  @param mapper  Function to transform each value.
-	 *  @param options Optional configuration.
-	 *  @returns Stream of transformed values.
+	 * Transform a stream by applying the given `mapper` function to each element. The
+	 * transformation can be one-to-one, or set the [[RedioOptions.oneToMany|one-to-many]]
+	 * flag and return an array of values to be flattenned downstream. The function can
+	 * be synchronous or asynchronous.
+	 * ```typescript
+	 * redio([1, 2, 3]).map(x => x * 2) // 2, 4, 6
+	 *
+	 * redio([1, 2, 3]).map(x => [x, x], { oneToMany: true })
+	 * // 1, 1, 2, 2, 3, 3
+	 * ```
+	 * @typeparam M Type of the values in the output stream.
+	 * @param mapper  Function to transform each value.
+	 * @param options Optional configuration.
+	 * @returns Stream of transformed values.
 	 */
 	map<M>(
 		mapper: (t: T) => M | Promise<M> | Array<M | RedioEnd> | Promise<Array<M | RedioEnd>>,
@@ -1048,8 +1070,20 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}, options)
 	}
 
-	find(_filter: (t: T) => Promise<boolean> | boolean, _options?: RedioOptions): RedioPipe<T> {
-		throw new Error('Not implemented')
+	find(filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T> {
+		let ended = false
+		return this.valve(async (t: T | RedioEnd): Promise<Liquid<T>> => {
+			if (ended || isEnd(t)) {
+				return end
+			}
+			if (isValue(t)) {
+				if (await filter(t)) {
+					ended = true
+					return t
+				}
+			}
+			return nil
+		}, options)
 	}
 
 	findWhere(_props: Record<string, unknown>, _options?: RedioOptions): RedioPipe<T> {
