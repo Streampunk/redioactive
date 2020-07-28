@@ -459,6 +459,33 @@ export interface RedioPipe<T> extends PipeFitting {
 		) => void,
 		options?: RedioOptions
 	): RedioPipe<M>
+	/**
+	 * Holds off pushing values down the pipe until there has been no more data for
+	 * the specified number of milliseconds. Sends the most recently received value before the
+	 * delay, discarding all other values. At the end of the source stream, the last value
+	 * received value is sent onwards immediately.
+	 * ```typescript
+	 * let pusher: (v?: number | RedioEnd | PromiseLike<number | RedioEnd> | undefined) => void = () => {  }
+	 * const funnel: Funnel<number> = () => new Promise<Liquid<number>>((resolve) => {
+	 *     pusher = resolve
+	 * })
+	 * let wait = (t: number) => new Promise<void>((resolve) => { setTimeout(resolve, t) })
+	 * async function run() {
+	 *   const stream = redio(funnel).debounce(75).toArray()
+	 *   pusher(1)
+	 *   await wait(10)
+	 *   pusher(2)
+	 *   await wait(100)
+	 *   pusher(3)
+	 *   await wait(50)
+	 *   pusher(end)
+	 * }
+	 * run() // [2, 3] after 260ms
+	 * ```
+	 * @param ms      Length of delay before emitting.
+	 * @param options Optional parameters.
+	 * @returns Stream containing debounced values.
+	 */
 	debounce(ms: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
 	/**
 	 * Execute a function on each value of the stream, emitting the value onto the output
@@ -482,10 +509,13 @@ export interface RedioPipe<T> extends PipeFitting {
 	 */
 	doto(f: (t: T) => Promise<void> | void, options?: RedioOptions): RedioPipe<T>
 	/**
-	 *  Ignores the first `num` values of the stream and emits the rest.
-	 *  @param num     Number of values to drop from the source. Default is 1.
-	 *  @param options Optional configuration.
-	 *  @returns Pipe containing a stream of values with the first `num` values missing.
+	 * Ignores the first `num` values of the stream and emits the rest.
+	 * ```typescript
+	 * redio([1, 2, 3, 4]).drop(2) // 3, 4
+	 * ```
+	 * @param num     Number of values to drop from the source. Default is 1.
+	 * @param options Optional configuration.
+	 * @returns Pipe containing a stream of values with the first `num` values missing.
 	 */
 	drop(num?: Promise<number> | number, options?: RedioOptions): RedioPipe<T>
 	/**
@@ -502,6 +532,9 @@ export interface RedioPipe<T> extends PipeFitting {
 	/**
 	 *  Apply the given filter function to all the values in the stream, keeping
 	 *  those that pass the test.
+	 *  ```typescript
+	 *
+	 *  ```
 	 *  @param filter  Function returning true for values to keep.
 	 *  @param options Optional configuration.
 	 *  @returns Stream of values that pass the test.
@@ -916,8 +949,43 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		return redio(genny, options)
 	}
 
-	debounce(_ms: Promise<number> | number, _options?: RedioOptions): RedioPipe<T> {
-		throw new Error('Not implemented')
+	debounce(ms: Promise<number> | number, options?: RedioOptions): RedioPipe<T> {
+		let timeout: NodeJS.Timeout | null
+		let genResolve: (v?: Liquid<T> | PromiseLike<Liquid<T>> | undefined) => void
+		let mostRecent: T | RedioNil = nil
+		let ended = false
+		function wait(t: number) {
+			return new Promise((resolve) => {
+				timeout = setTimeout(() => {
+					resolve()
+					timeout = null
+				}, t)
+			})
+		}
+		const num: Promise<number> = isAPromise(ms) ? ms : Promise.resolve(ms)
+		const genny: Funnel<T> = () =>
+			new Promise((resolve, _reject) => {
+				if (ended) {
+					resolve(end)
+				} else {
+					genResolve = resolve
+				}
+			})
+		this.spout(async (t: T | RedioEnd) => {
+			const w = await num
+			if (isEnd(t)) {
+				timeout && clearTimeout(timeout)
+				genResolve(mostRecent)
+				ended = true
+				return
+			}
+			if (timeout) {
+				clearTimeout(timeout)
+			}
+			wait(w).then(() => genResolve(t))
+			mostRecent = t
+		})
+		return redio(genny, options)
 	}
 
 	doto(f: (t: T) => Promise<void> | void, _options?: RedioOptions): RedioPipe<T> {
