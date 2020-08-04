@@ -7,8 +7,8 @@
 		{
 			"type": "node",
 			"request": "launch",
-			"name": "Jest test errors",
-			"args": ["-i", "errors"],
+			"name": "Jest test sequence",
+			"args": ["-i", "sequence"],
 			"program": "${workspaceRoot}\\node_modules\\jest\\bin\\jest.js",
 			"internalConsoleOptions": "openOnSessionStart",
 			// "preLaunchTask": "tsc: build - tsconfig.json",

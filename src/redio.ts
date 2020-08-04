@@ -375,6 +375,7 @@ interface EventOptions extends RedioOptions {
  *  @typeparam T Type of liquid travelling down the pipe.
  */
 export interface RedioPipe<T> extends PipeFitting {
+	redioPipe: 'redioPipe'
 	/**
 	 *  Apply a [[Valve|valve]] function to every element of the stream,
 	 *  transforming the stream from type `T` to type `S`.
@@ -558,6 +559,11 @@ export interface RedioPipe<T> extends PipeFitting {
 	 * @returns Single-element stream with value that passes the filter test.
 	 */
 	find(filter: (t: T) => Promise<boolean> | boolean, options?: RedioOptions): RedioPipe<T>
+	/**
+	 *
+	 * @param props
+	 * @param options
+	 */
 	findWhere(props: Record<string, unknown>, options?: RedioOptions): RedioPipe<T>
 	group(f: string | ((t: T) => unknown), options?: RedioOptions): RedioPipe<T>
 	head(options?: RedioOptions): RedioPipe<T>
@@ -572,7 +578,6 @@ export interface RedioPipe<T> extends PipeFitting {
 	 * be synchronous or asynchronous.
 	 * ```typescript
 	 * redio([1, 2, 3]).map(x => x * 2) // 2, 4, 6
-	 *
 	 * redio([1, 2, 3]).map(x => [x, x], { oneToMany: true })
 	 * // 1, 1, 2, 2, 3, 3
 	 * ```
@@ -617,14 +622,17 @@ export interface RedioPipe<T> extends PipeFitting {
 	concat(ys: RedioPipe<T> | Array<T>, options?: RedioOptions): RedioPipe<T>
 	flatFilter(f: (t: T) => RedioPipe<boolean>, options?: RedioOptions): RedioPipe<T>
 	/**
-	 *  Create a new stream of values by applying a function to each value, where
-	 *  that function returns a (possibly empty) stream. Each of the result streams
-	 *  are then emitted on a single output stream.
-	 *  Functionally equivalent to `.map<RedioPipe<M>>(f).sequence()`.
-	 *  @param f       Functions that maps values of type T to streams of type M.
-	 *  @param options Optional configuration.
-	 *  @typeparam M   Type of values contained in the output stream.
-	 *  @returns       Sequence of values from streams crated by applying `f`.
+	 * Create a new stream of values by applying a function to each value, where
+	 * that function returns a (possibly empty) stream. Each of the result streams
+	 * are then emitted on a single output stream.
+	 * Functionally equivalent to `.map<RedioPipe<M>>(f).sequence()`.
+	 * ```typescript
+	 * redio([1, 2, 3]).flatMap(x => redio([x, x])).toArray() // [1, 1, 2, 2, 3, 3]
+	 * ```
+	 * @param f       Functions that maps values of type T to streams of type M.
+	 * @param options Optional configuration.
+	 * @typeparam M   Type of values contained in the output stream.
+	 * @returns       Sequence of values from streams crated by applying `f`.
 	 */
 	flatMap<M>(f: (t: T) => RedioPipe<M>, options?: RedioOptions): RedioPipe<M>
 	flatten<F>(options?: RedioOptions): RedioPipe<F> // where T === Liquid<F>
@@ -645,10 +653,20 @@ export interface RedioPipe<T> extends PipeFitting {
 	otherwise<O>(ys: RedioPipe<O> | (() => RedioPipe<O>), options?: RedioOptions): RedioPipe<T | O>
 	parallel<P>(n: number, options?: RedioOptions): RedioPipe<P>
 	/**
-	 *  Reads a stream of streams and pushes each value on each streeam in sequence
-	 *  in turn onto the output pipe, a kind of flatten.
-	 *
-	 *  @param options
+	 * Reads a stream of streams and pushes each value on each stream in sequence
+	 * onto the output pipe. A kind of flatten. Note that the output type `S` is
+	 * the union of all input streams' types.
+	 * ```typescript
+	 * redio([
+	 *     redio([1, 2, 3]),
+	 *     redio([4, 5]),
+	 *     redio([]),
+	 *     redio([6])
+	 * ]).sequence<number>().toArray() // [1, 2, 3, 4, 5, 6]
+	 * ```
+	 * @param options Optional configuration.
+	 * @returns Stream of values in sequence taken one-by-one from each source stream.
+	 * @typeparam S Union of all the input stream types.
 	 */
 	sequence<S>(options?: RedioOptions): RedioPipe<S>
 	series<S>(options?: RedioOptions): RedioPipe<S>
@@ -733,7 +751,12 @@ abstract class RedioFitting implements PipeFitting {
 	}
 }
 
+export function isPipe<T>(x: any): x is RedioPipe<T> {
+	return typeof x === 'object' && x.redioPipe && x.redioPipe === 'redioPipe'
+}
+
 abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
+	public redioPipe: 'redioPipe' = 'redioPipe'
 	protected _followers: Array<RedioProducer<unknown> | RedioSink<T>> = []
 	protected _pullCheck: Set<number> = new Set<number>()
 	protected _buffer: Liquid<T>[] = []
@@ -1269,13 +1292,74 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
 
-	sequence<S>(_options?: RedioOptions): RedioPipe<S> {
-		throw new Error('Not implemented')
+	// TODO error handling
+	sequence<S>(options?: RedioOptions): RedioPipe<S> {
+		let inEnded = false // The stream of streams has ended
+		let outEnded = false // The most recent stream has ended
+		let pending: S | RedioNil | RedioEnd = nil
+		let inResolver: (() => void) | null = null
+		let outResolver: ((v?: Liquid<S> | PromiseLike<Liquid<S>> | undefined) => void) | null = null
+		let streamResolver: ((v?: void | PromiseLike<void> | undefined) => void) | null = null
+		this.spout(
+			(t: T | RedioEnd) =>
+				new Promise<void>((resolve, _reject) => {
+					if (isEnd(t)) {
+						outResolver && outResolver(end)
+						inEnded = true
+						resolve()
+					} else {
+						outEnded = false
+						nextSpout((t as unknown) as RedioPipe<S>)
+						streamResolver = resolve
+					}
+				})
+		)
+		function nextSpout(pipe: RedioPipe<S>): RedioStream<S> {
+			return pipe.spout(
+				(s: S | RedioEnd) =>
+					new Promise<void>((resolve, _reject) => {
+						if (isEnd(s)) {
+							streamResolver && streamResolver()
+							streamResolver = null
+							outEnded = true
+							return
+						}
+						outEnded = false
+						if (outResolver) {
+							outResolver(s)
+							outResolver = null
+							resolve()
+						} else {
+							if (isNil(pending)) {
+								pending = s
+								inResolver = null
+							} else {
+								inResolver = () => {
+									pending = s
+									resolve()
+								}
+							}
+						}
+					})
+			)
+		}
+		const out: Funnel<S> = () =>
+			new Promise<Liquid<S>>((resolve, _reject) => {
+				if (inEnded && outEnded) {
+					resolve(end)
+					return
+				}
+				if (!isNil(pending)) {
+					resolve(pending)
+					pending = nil
+					inResolver && inResolver()
+					inResolver = null
+				} else {
+					outResolver = resolve
+				}
+			})
+		return redio(out, options)
 	}
-	// sequence<S, T extends RedioPipe<S>>(_options?: RedioOptions): RedioPipe<S> {
-	// 	let f: Funnel<S> = () => new Promise<LotsOfLiquid<S>>((resolve, reject) => {})
-	// 	return redio(f)
-	// }
 
 	series<S>(_options?: RedioOptions): RedioPipe<S> {
 		throw new Error('Not implemented')
@@ -1524,9 +1608,9 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 						// }
 					} else if (isNil(result)) {
 						// Don't push
-						if (isEnd(v)) {
-							this.push(end)
-						}
+						// if (isEnd(v)) { Note - Does not get called
+						// 	this.push(end)
+						// }
 					} else {
 						this.push(result)
 						if (isEnd(v) && !isEnd(result)) {
