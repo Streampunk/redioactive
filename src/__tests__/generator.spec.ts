@@ -80,6 +80,51 @@ describe('Generate a stream by async callback generator', () => {
 	})
 })
 
+describe('Generate a stream of arrays by sync thunk', () => {
+	const gen = (x: number): Generator<number[]> => {
+		let count = 0
+		return () => (count < x ? [0, count++] : end)
+	}
+	test('Value generate zero values', async () => {
+		await expect(redio(gen(0)).toArray()).resolves.toEqual([])
+	})
+	test('Value generate one value', async () => {
+		await expect(redio(gen(1)).toArray()).resolves.toEqual([[0, 0]])
+	})
+	test('Value generate four values', async () => {
+		await expect(redio(gen(4)).toArray()).resolves.toEqual([
+			[0, 0],
+			[0, 1],
+			[0, 2],
+			[0, 3]
+		])
+	})
+})
+
+describe.skip('Generate a stream of arrays by sync callback generator', () => {
+	const gen = (x: number): Generator<number[]> => {
+		let count = 0
+		return (push: (t: number[] | RedioEnd) => void, next: () => void) => {
+			push(count < x ? [0, count++] : end)
+			next()
+		}
+	}
+	test('Value generate zero values', async () => {
+		await expect(redio(gen(0)).toArray()).resolves.toEqual([])
+	})
+	test('Value generate one value', async () => {
+		await expect(redio(gen(1)).toArray()).resolves.toEqual([[0, 0]])
+	})
+	test('Value generate four values', async () => {
+		await expect(redio(gen(4)).toArray()).resolves.toEqual([
+			[0, 0],
+			[0, 1],
+			[0, 2],
+			[0, 3]
+		])
+	})
+})
+
 describe('Generate a stream from an array', () => {
 	test('Array with no values', async () => {
 		await expect(redio([]).toArray()).resolves.toHaveLength(0)
@@ -179,6 +224,7 @@ describe('Generator from events', () => {
 describe('Generate, then consume later', () => {
 	test('Make more than we can eat', async () => {
 		const str = redio([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		const endStr = str.each((_x) => {
 			return new Promise<void>((resolve) => {
 				setTimeout(() => {
@@ -191,7 +237,7 @@ describe('Generate, then consume later', () => {
 	})
 })
 
-describe.only('Delayed generator start test', () => {
+describe('Delayed generator start test', () => {
 	const wait = async (t: number): Promise<void> =>
 		new Promise((resolve) => {
 			setTimeout(resolve, t)
