@@ -1,6 +1,6 @@
 {
 	"name": "redioactive",
-	"version": "0.0.7",
+	"version": "0.0.8",
 	"description": "Reactive streams for chaining overlapping promises.",
 	"main": "dist/index.js",
 	"types": "dist/redio.d.ts",
@@ -35,7 +35,7 @@
 	},
 	"devDependencies": {
 		"@types/jest": "^26.0.13",
-		"@types/node": "^14.10.1",
+		"@types/node": "^12.12.58",
 		"@typescript-eslint/eslint-plugin": "^4.1.1",
 		"@typescript-eslint/parser": "^4.1.1",
 		"codecov": "^3.7.2",
