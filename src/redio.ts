@@ -352,7 +352,7 @@ interface StreamOptions extends RedioOptions {
 	 */
 	chunkSize?: number
 	/** Encoding to set to convert buffers to strings. Leave unset for buffers. */
-	encoding?: string
+	encoding?: BufferEncoding
 }
 
 /**
@@ -801,8 +801,8 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		this._buffer.push(x)
 		if (this._debug) {
 			console.log(
-				`Push in fitting ${this.fittingId}: buffer now length=${this._buffer.length} value=${x}`
-			)
+				// eslint-disable-next-line prettier/prettier
+				'Push in fitting', this.fittingId, 'buffer now length =', this._buffer.length, 'value =', x)
 		}
 		if (this._buffer.length >= this._bufferSizeMax) this._running = false
 		if (!this._paused) {
@@ -815,7 +815,8 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		if (!provideVal) {
 			if (this._debug) {
 				console.log(
-					`Pausing on pull in fitting ${this.fittingId} with ${this._followers.length}. Repeated pulls from ${puller.fittingId}.`
+					// eslint-disable-next-line prettier/prettier
+					'Pausing on pull in fitting', this.fittingId, 'with', this._followers.length, '. Repeated pulls from',  puller.fittingId
 				)
 			}
 			this._paused = true
@@ -823,7 +824,8 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		this._pullCheck.add(puller.fittingId)
 		if (this._debug) {
 			console.log(
-				`Received pull at fitting source ${this.fittingId} to destination ${puller.fittingId} with count ${this._pullCheck.size} / ${this._followers.length}`
+				// eslint-disable-next-line prettier/prettier
+				'Received pull at fitting source', this.fittingId, 'to destination', puller.fittingId, 'with count', this._pullCheck.size, '/', this._followers.length
 			)
 		}
 		let val: Liquid<T> | undefined
@@ -836,7 +838,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 			}
 			if (this._paused) {
 				if (this._debug) {
-					console.log(`Resuming in pull for fitting ${this.fittingId}.`)
+					console.log('Resuming in pull for fitting', this.fittingId)
 				}
 				this._paused = false
 				process.nextTick(() => this._followers.forEach((follower) => follower.next()))
@@ -874,7 +876,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	append(v: T | RedioEnd | Promise<T>, options?: RedioOptions): RedioPipe<T> {
 		return this.valve(async (t: Liquid<T>): Promise<Liquid<T>> => {
 			if (this._debug) {
-				console.log(`Append at end ${isEnd(t)} value ${t}`)
+				console.log('Append at end', isEnd(t), 'value', t)
 			}
 			if (isEnd(t)) {
 				return v
@@ -1561,7 +1563,8 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 						this._ready = true
 						resolve(t)
 						if (this._debug) {
-							console.log(`Fitting ${this._debug}: middler(${isEnd(s) ? 'THE END' : s}) = ${t}`)
+							// eslint-disable-next-line prettier/prettier
+							console.log('Fitting', this.fittingId, ': middler(', isEnd(s) ? 'THE END' : s, ') =', t)
 						}
 						// if (!isEnd(t)) {
 						// 	this.next()
@@ -1767,7 +1770,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 					}
 					if (!handled) {
 						if (this._debug || !this._rejectUnhandled) {
-							console.log(`Error: Unhandled error at end of chain: ${err.message}`)
+							console.log('Error: Unhandled error at end of chain:', err.message)
 						}
 						// Will be unhandled - thrown into asynchronous nowhere
 						if (this._rejectUnhandled) {
