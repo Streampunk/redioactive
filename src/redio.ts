@@ -751,8 +751,12 @@ abstract class RedioFitting implements PipeFitting {
 	}
 }
 
-export function isPipe<T>(x: any): x is RedioPipe<T> {
-	return typeof x === 'object' && x.redioPipe && x.redioPipe === 'redioPipe'
+export function isPipe<T>(x: unknown): x is RedioPipe<T> {
+	return (
+		typeof x === 'object' &&
+		(x as RedioPipe<T>).redioPipe &&
+		(x as RedioPipe<T>).redioPipe === 'redioPipe'
+	)
 }
 
 abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
@@ -952,6 +956,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		let genResolve:
 			| ((v?: M | RedioEnd | RedioNil | PromiseLike<M> | undefined) => void)
 			| null = null
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		let genReject: ((reason?: any) => void) | null = null
 		const pending: Array<Liquid<M>> = []
 		const genny: Funnel<M> = () =>
@@ -970,6 +975,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 					genReject = null
 					resolve(m)
 				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				genReject = (reason?: any) => {
 					genResolve = null
 					genReject = null
@@ -1427,8 +1433,115 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}, options)
 	}
 
-	zipEach<Z>(_ys: RedioPipe<Z>[], _options?: RedioOptions): RedioPipe<[T, ...Z[]]> {
-		throw new Error('Not implemented')
+	zipEach<Z>(ys: RedioPipe<Z>[], options?: RedioOptions): RedioPipe<[T, ...Z[]]> {
+		let zLen = ys.length
+		let pendingT: T | RedioEnd | null = null
+		let pendingZs: (Z | RedioEnd | undefined)[] = Array(zLen).fill(undefined)
+		let tResolver: (tz: Liquid<[T, ...Z[]]> | PromiseLike<Liquid<[T, ...Z[]]>> | undefined) => void
+		let zResolvers: ((v: void | PromiseLike<void> | undefined) => void)[] = Array(zLen).fill(
+			undefined
+		)
+		let doUpdate = false
+
+		function reset(): void {
+			pendingT = null
+			pendingZs.forEach((pz, i) => (pendingZs[i] = isEnd(pz) ? pz : undefined))
+			zResolvers.forEach((zr) => {
+				if (zr) zr()
+			})
+			zResolvers = Array(zLen).fill(undefined)
+
+			if (doUpdate) {
+				doUpdate = false
+				pendingZs = Array(zLen).fill(undefined)
+				makeSpouts()
+			}
+		}
+
+		function checkUpdate(): void {
+			if (ys.length !== zLen) {
+				// console.log(
+				// 	`${ys.length > zLen ? 'In' : 'De'}crease zipEach array length ${zLen} -> ${ys.length}`
+				// )
+				zLen = ys.length
+				doUpdate = true
+			}
+		}
+
+		function makeSpouts(): void {
+			ys.forEach((pipe, i) => {
+				pipe.spout((z: Z | RedioEnd) => {
+					if (pendingZs[i] === undefined) {
+						pendingZs[i] = z
+					} else {
+						if (isEnd(z) && isEnd(pendingZs[i])) {
+							zResolvers[i]()
+						} else {
+							console.log('resolve with pending Z')
+							tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
+							reset()
+							pendingZs[i] = z
+						}
+					}
+					return new Promise<void>((resolve) => {
+						zResolvers[i] = resolve
+						if (pendingT) {
+							if (isEnd(pendingT)) {
+								tResolver(end)
+								reset()
+							} else {
+								if (pendingZs.reduce((acc, pz) => acc && pz !== undefined, true)) {
+									tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
+									reset()
+								}
+							}
+						}
+					})
+				})
+			})
+		}
+		makeSpouts()
+
+		return this.valve<[T, ...Z[]]>((t: T | RedioEnd): Promise<Liquid<[T, ...Z[]]>> => {
+			return new Promise<Liquid<[T, ...Z[]]>>((resolve) => {
+				tResolver = resolve
+				checkUpdate()
+				if (pendingT === null) {
+					pendingT = t
+					if (pendingZs.length === 0 || isEnd(pendingT)) {
+						if (isEnd(pendingT)) {
+							tResolver(end)
+						} else {
+							tResolver([pendingT])
+							reset()
+						}
+						pendingT = null
+					}
+				} else {
+					console.log('Here I am!')
+					if (isEnd(t) && isEnd(pendingT)) {
+						tResolver(nil)
+					} else {
+						console.log('resolve with pending T')
+						tResolver([pendingT as T, ...(pendingZs as Z[])])
+						pendingT = t
+					}
+				}
+				pendingZs.forEach((pendingZ) => {
+					if (pendingZ) {
+						if (isEnd(pendingT)) {
+							tResolver(end)
+							pendingT = null
+						} else {
+							if (pendingZs.reduce((acc, pz) => acc && pz !== undefined, true)) {
+								tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
+								reset()
+							}
+						}
+					}
+				})
+			})
+		}, options)
 	}
 
 	each(dotoall?: (t: T) => void | Promise<void>, options?: RedioOptions): RedioStream<T> {
@@ -1801,6 +1914,7 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 	}
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function isReadableStream(x: any): x is Readable {
 	return (
 		x !== null &&
@@ -1960,7 +2074,9 @@ export default function redio<T>(
 			return args1[index++]
 		}, options)
 	}
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	if (typeof args1 === 'object' && typeof (args1 as any)[Symbol.iterator] === 'function') {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		const it: Iterator<T> = (args1 as any)[Symbol.iterator]()
 		const options: RedioOptions | undefined = args2 as RedioOptions | undefined
 		const itGenny: Funnel<T> = () =>
@@ -1980,6 +2096,7 @@ export default function redio<T>(
 	}
 	if (isReadableStream(args1)) {
 		const options: StreamOptions | undefined = args2 as StreamOptions | undefined
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		let rejector: (reason?: any) => void = (err) => {
 			console.error('Redioactive: unexpected stream error: ', err)
 		}
@@ -2037,11 +2154,13 @@ export default function redio<T>(
 					resolve(end)
 					return
 				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				const resolver = (x: any) => {
 					args1.removeListener(errorName, rejector)
 					args1.removeListener(endName, ender)
 					resolve(x)
 				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				const rejector = (err: any) => {
 					args1.removeListener(eventName, resolver)
 					args1.removeListener(endName, ender)
