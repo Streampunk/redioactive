@@ -457,7 +457,7 @@ export interface RedioPipe<T> extends PipeFitting {
 			x: T | RedioEnd | null,
 			push: (m: Liquid<M>) => void,
 			next: () => void
-		) => void,
+		) => Promise<void> | void,
 		options?: RedioOptions
 	): RedioPipe<M>
 	/**
@@ -590,6 +590,14 @@ export interface RedioPipe<T> extends PipeFitting {
 		mapper: (t: T) => M | Promise<M> | Array<M | RedioEnd> | Promise<Array<M | RedioEnd>>,
 		options?: RedioOptions
 	): RedioPipe<M>
+	/**
+	 * Allow the pausing of a stream, so that the source stops streaming but stays ready to
+	 * flow again, while the output stream consists of repeated copies of the latest source value.
+	 * The t value passed to the function is the latest source value
+	 * @param paused  Function returns whether the stream should be paused.
+	 * @param options Optional configuration.
+	 */
+	pause(paused: (t: Liquid<T>) => boolean, options?: RedioOptions): RedioPipe<T>
 	pick(properties: Array<string>, options?: RedioOptions): RedioPipe<T>
 	pickBy(f: (key: string, value: unknown) => boolean, options?: RedioOptions): RedioPipe<T>
 	pluck(prop: string, options?: RedioOptions): RedioPipe<T>
@@ -1157,6 +1165,56 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}, options)
 	}
 
+	pause(paused: (t: Liquid<T>) => boolean, options?: RedioOptions): RedioPipe<T> {
+		const pauseOptions = Object.assign(this.options, options)
+		let lastVal: Liquid<T> = nil
+		let genResolve: ((t?: Liquid<T> | PromiseLike<T> | undefined) => void) | null = null
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		let genReject: ((reason?: any) => void) | null = null
+		let spoutResolve: ((value?: void | PromiseLike<void> | undefined) => void) | null = null
+		const genny: Funnel<T> = () => {
+			return new Promise((resolve, reject) => {
+				genResolve = (t?: Liquid<T> | PromiseLike<T> | undefined) => {
+					genResolve = null
+					genReject = null
+					resolve(t)
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				genReject = (reason?: any) => {
+					genResolve = null
+					genReject = null
+					reject(reason)
+				}
+
+				if (isValue(lastVal)) {
+					if (paused(lastVal)) {
+						if (genResolve) genResolve(lastVal)
+					} else {
+						if (spoutResolve) spoutResolve()
+					}
+				}
+			})
+		}
+
+		this.spout((t: Liquid<T>) => {
+			lastVal = t
+			return new Promise<void>((resolve, _reject) => {
+				if (isAnError(t)) {
+					if (genReject) genReject(t)
+				} else {
+					if (genResolve) genResolve(t)
+				}
+
+				spoutResolve = () => {
+					spoutResolve = null
+					resolve()
+				}
+			})
+		}, pauseOptions)
+
+		return redio(genny, pauseOptions)
+	}
+
 	pick(_properties: Array<string>, _options?: RedioOptions): RedioPipe<T> {
 		throw new Error('Not implemented')
 	}
@@ -1470,34 +1528,36 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 
 		function makeSpouts(): void {
 			ys.forEach((pipe, i) => {
-				pipe.spout((z: Z | RedioEnd) => {
-					if (pendingZs[i] === undefined) {
-						pendingZs[i] = z
-					} else {
-						if (isEnd(z) && isEnd(pendingZs[i])) {
-							zResolvers[i]()
-						} else {
-							console.log('resolve with pending Z')
-							tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
-							reset()
+				if ((pipe as RedioProducer<Z>)._followers.length === 0) {
+					pipe.spout((z: Z | RedioEnd) => {
+						if (pendingZs[i] === undefined) {
 							pendingZs[i] = z
-						}
-					}
-					return new Promise<void>((resolve) => {
-						zResolvers[i] = resolve
-						if (pendingT) {
-							if (isEnd(pendingT)) {
-								tResolver(end)
-								reset()
+						} else {
+							if (isEnd(z) && isEnd(pendingZs[i])) {
+								zResolvers[i]()
 							} else {
-								if (pendingZs.reduce((acc, pz) => acc && pz !== undefined, true)) {
-									tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
-									reset()
-								}
+								console.log('resolve with pending Z')
+								tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
+								reset()
+								pendingZs[i] = z
 							}
 						}
+						return new Promise<void>((resolve) => {
+							zResolvers[i] = resolve
+							if (pendingT) {
+								if (isEnd(pendingT)) {
+									tResolver(end)
+									reset()
+								} else {
+									if (pendingZs.reduce((acc, pz) => acc && pz !== undefined, true)) {
+										tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
+										reset()
+									}
+								}
+							}
+						})
 					})
-				})
+				}
 			})
 		}
 		makeSpouts()
