@@ -771,6 +771,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	public redioPipe: 'redioPipe' = 'redioPipe'
 	protected _followers: Array<RedioProducer<unknown> | RedioSink<T>> = []
 	protected _pullCheck: Set<number> = new Set<number>()
+	protected _lastVal: Map<number, Liquid<T>> = new Map<number, T>()
 	protected _buffer: Liquid<T>[] = []
 	protected _running = true
 	protected _bufferSizeMax = 10
@@ -843,6 +844,14 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		let val: Liquid<T> | undefined
 		if (this._pullCheck.size === this._followers.length) {
 			val = this._buffer.shift()
+			this._lastVal.delete(puller.fittingId)
+			this._pullCheck.forEach((p) => {
+				if (val && p !== puller.fittingId) {
+					const last = this._lastVal.get(p)
+					if (val !== last) this._lastVal.set(p, val)
+					else this._lastVal.delete(p)
+				}
+			})
 			this._pullCheck.clear()
 			if (!this._running && this._buffer.length < this._drainFactor * this._bufferSizeMax) {
 				this._running = true
@@ -856,7 +865,12 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 				process.nextTick(() => this._followers.forEach((follower) => follower.next()))
 			}
 		} else {
-			val = provideVal ? this._buffer[0] : undefined
+			const last = this._lastVal.get(puller.fittingId)
+			val = provideVal ? (last ? last : this._buffer[0]) : undefined
+			if (val && provideVal) {
+				if (val !== last) this._lastVal.set(puller.fittingId, val)
+				else this._lastVal.delete(puller.fittingId)
+			}
 		}
 		return val !== undefined ? val : nil
 	}
