@@ -27,7 +27,7 @@ describe('Debounce vales', () => {
 		await expect(redio([1, 2, 3]).debounce(-10).toArray()).resolves.toEqual([3])
 	})
 
-	let pusher: (v?: number | RedioEnd | PromiseLike<number | RedioEnd> | undefined) => void = () => {
+	let pusher: (v: number | RedioEnd | PromiseLike<number | RedioEnd>) => void = () => {
 		/* void */
 	}
 	const funnel: Funnel<number> = () =>

@@ -841,10 +841,10 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 				'Received pull at fitting source', this.fittingId, 'to destination', puller.fittingId, 'with count', this._pullCheck.size, '/', this._followers.length
 			)
 		}
+		const last = this._lastVal.get(puller.fittingId)
 		let val: Liquid<T> | undefined
-		if (this._pullCheck.size === this._followers.length) {
+		if (this._pullCheck.size === this._followers.length && !last) {
 			val = this._buffer.shift()
-			this._lastVal.delete(puller.fittingId)
 			this._pullCheck.forEach((p) => {
 				if (val && p !== puller.fittingId) {
 					const last = this._lastVal.get(p)
@@ -865,13 +865,15 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 				process.nextTick(() => this._followers.forEach((follower) => follower.next()))
 			}
 		} else {
-			const last = this._lastVal.get(puller.fittingId)
 			val = provideVal ? (last ? last : this._buffer[0]) : undefined
 			if (val && provideVal) {
 				if (val !== last) this._lastVal.set(puller.fittingId, val)
 				else this._lastVal.delete(puller.fittingId)
 			}
 		}
+		if (this._debug)
+			// eslint-disable-next-line prettier/prettier
+			console.log('Pull at fitting source', this.fittingId, 'to destination', puller.fittingId, 'returning', val !== undefined ? val : nil)
 		return val !== undefined ? val : nil
 	}
 
@@ -975,16 +977,14 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		) => Promise<void> | void,
 		options?: RedioOptions
 	): RedioPipe<M> {
-		let genResolve:
-			| ((v?: M | RedioEnd | RedioNil | PromiseLike<M> | undefined) => void)
-			| null = null
+		let genResolve: ((v: M | RedioEnd | RedioNil | PromiseLike<M>) => void) | null = null
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		let genReject: ((reason?: any) => void) | null = null
 		const pending: Array<Liquid<M>> = []
 		const genny: Funnel<M> = () =>
 			new Promise((resolve, reject) => {
 				if (pending.length > 0) {
-					const value = pending.shift()
+					const value = pending.shift() as Liquid<M>
 					if (isAnError(value)) {
 						reject(value)
 					} else {
@@ -992,7 +992,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 					}
 					return
 				}
-				genResolve = (m?: M | RedioEnd | RedioNil | PromiseLike<M> | undefined) => {
+				genResolve = (m: M | RedioEnd | RedioNil | PromiseLike<M>) => {
 					genResolve = null
 					genReject = null
 					resolve(m)
@@ -1030,11 +1030,11 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 
 	debounce(ms: Promise<number> | number, options?: RedioOptions): RedioPipe<T> {
 		let timeout: NodeJS.Timeout | null
-		let genResolve: (v?: Liquid<T> | PromiseLike<Liquid<T>> | undefined) => void
+		let genResolve: (v: Liquid<T> | PromiseLike<Liquid<T>>) => void
 		let mostRecent: T | RedioNil = nil
 		let ended = false
 		function wait(t: number) {
-			return new Promise((resolve) => {
+			return new Promise<void>((resolve) => {
 				timeout = setTimeout(() => {
 					resolve()
 					timeout = null
@@ -1182,13 +1182,13 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	pause(paused: (t: Liquid<T>) => boolean, options?: RedioOptions): RedioPipe<T> {
 		const pauseOptions = Object.assign(this.options, options)
 		let lastVal: Liquid<T> = nil
-		let genResolve: ((t?: Liquid<T> | PromiseLike<T> | undefined) => void) | null = null
+		let genResolve: ((t: Liquid<T> | PromiseLike<T>) => void) | null = null
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		let genReject: ((reason?: any) => void) | null = null
 		let spoutResolve: ((value?: void | PromiseLike<void> | undefined) => void) | null = null
 		const genny: Funnel<T> = () => {
 			return new Promise((resolve, reject) => {
-				genResolve = (t?: Liquid<T> | PromiseLike<T> | undefined) => {
+				genResolve = (t: Liquid<T> | PromiseLike<T>) => {
 					genResolve = null
 					genReject = null
 					resolve(t)
@@ -1378,7 +1378,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		let outEnded = false // The most recent stream has ended
 		let pending: S | RedioNil | RedioEnd = nil
 		let inResolver: (() => void) | null = null
-		let outResolver: ((v?: Liquid<S> | PromiseLike<Liquid<S>> | undefined) => void) | null = null
+		let outResolver: ((v: Liquid<S> | PromiseLike<Liquid<S>>) => void) | null = null
 		let streamResolver: ((v?: void | PromiseLike<void> | undefined) => void) | null = null
 		this.spout(
 			(t: T | RedioEnd) =>
@@ -1448,7 +1448,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	zip<Z>(zs: RedioPipe<Z>, options?: RedioOptions): RedioPipe<[T?, Z?]> {
 		let pendingT: T | RedioEnd | null = null
 		let pendingZ: Z | RedioEnd | null = null
-		let tResolver: (tz: Liquid<[T?, Z?]> | PromiseLike<Liquid<[T, Z]>> | undefined) => void
+		let tResolver: (tz: Liquid<[T?, Z?]> | PromiseLike<Liquid<[T, Z]>>) => void
 		let zResolver: (v: void | PromiseLike<void> | undefined) => void
 		zs.spout((z: Z | RedioEnd) => {
 			if (pendingZ === null) {
@@ -1509,7 +1509,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		let zLen = ys.length
 		let pendingT: T | RedioEnd | null = null
 		let pendingZs: (Z | RedioEnd | undefined)[] = Array(zLen).fill(undefined)
-		let tResolver: (tz: Liquid<[T, ...Z[]]> | PromiseLike<Liquid<[T, ...Z[]]>> | undefined) => void
+		let tResolver: (tz: Liquid<[T, ...Z[]]> | PromiseLike<Liquid<[T, ...Z[]]>>) => void
 		let zResolvers: ((v: void | PromiseLike<void> | undefined) => void)[] = Array(zLen).fill(
 			undefined
 		)

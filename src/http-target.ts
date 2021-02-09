@@ -64,7 +64,7 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 	)
 	let info: ConInfo
 	let nextExpectedId: string | number = -1
-	let pushResolver: (v?: Liquid<T> | PromiseLike<Liquid<T>> | undefined) => void
+	let pushResolver: (v: Liquid<T> | PromiseLike<Liquid<T>>) => void
 	let pushPull: (v?: void | PromiseLike<void> | undefined) => void = () => {
 		/* void */
 	}
