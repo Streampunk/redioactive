@@ -1507,6 +1507,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 
 	zipEach<Z>(ys: RedioPipe<Z>[], options?: RedioOptions): RedioPipe<[T, ...Z[]]> {
 		let zLen = ys.length
+		let pipeIds = ys.map((y) => y.fittingId)
 		let pendingT: T | RedioEnd | null = null
 		let pendingZs: (Z | RedioEnd | undefined)[] = Array(zLen).fill(undefined)
 		let tResolver: (tz: Liquid<[T, ...Z[]]> | PromiseLike<Liquid<[T, ...Z[]]>>) => void
@@ -1531,6 +1532,12 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}
 
 		function checkUpdate(): void {
+			const curIds = ys.map((y) => {
+				if (!pipeIds.find((id) => y.fittingId === id)) doUpdate = true
+				return y.fittingId
+			})
+			pipeIds = curIds
+
 			if (ys.length !== zLen) {
 				// console.log(
 				// 	`${ys.length > zLen ? 'In' : 'De'}crease zipEach array length ${zLen} -> ${ys.length}`
@@ -1541,23 +1548,24 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		}
 
 		function makeSpouts(): void {
-			ys.forEach((pipe, i) => {
+			ys.forEach((pipe) => {
 				if ((pipe as RedioProducer<Z>)._followers.length === 0) {
 					pipe.spout((z: Z | RedioEnd) => {
-						if (pendingZs[i] === undefined) {
-							pendingZs[i] = z
+						const zIndex = pipeIds.findIndex((id) => pipe.fittingId === id)
+						if (pendingZs[zIndex] === undefined) {
+							pendingZs[zIndex] = z
 						} else {
-							if (isEnd(z) && isEnd(pendingZs[i])) {
-								zResolvers[i]()
+							if (isEnd(z) && isEnd(pendingZs[zIndex])) {
+								zResolvers[zIndex]()
 							} else {
 								console.log('resolve with pending Z')
 								tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
 								reset()
-								pendingZs[i] = z
+								pendingZs[zIndex] = z
 							}
 						}
 						return new Promise<void>((resolve) => {
-							zResolvers[i] = resolve
+							zResolvers[zIndex] = resolve
 							if (pendingT) {
 								if (isEnd(pendingT)) {
 									tResolver(end)
@@ -1585,11 +1593,11 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 					if (pendingZs.length === 0 || isEnd(pendingT)) {
 						if (isEnd(pendingT)) {
 							tResolver(end)
+							pendingT = null
 						} else {
 							tResolver([pendingT])
 							reset()
 						}
-						pendingT = null
 					}
 				} else {
 					console.log('Here I am!')
@@ -1597,23 +1605,22 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 						tResolver(nil)
 					} else {
 						console.log('resolve with pending T')
-						tResolver([pendingT as T, ...(pendingZs as Z[])])
+						tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
 						pendingT = t
 					}
 				}
-				pendingZs.forEach((pendingZ) => {
-					if (pendingZ) {
-						if (isEnd(pendingT)) {
-							tResolver(end)
-							pendingT = null
-						} else {
-							if (pendingZs.reduce((acc, pz) => acc && pz !== undefined, true)) {
-								tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
-								reset()
-							}
+
+				if (pendingZs.reduce((acc, pz) => acc || pz !== undefined, false)) {
+					if (isEnd(pendingT)) {
+						tResolver(end)
+						pendingT = null
+					} else {
+						if (pendingZs.reduce((acc, pz) => acc && pz !== undefined, true)) {
+							tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
+							reset()
 						}
 					}
-				})
+				}
 			})
 		}, options)
 	}

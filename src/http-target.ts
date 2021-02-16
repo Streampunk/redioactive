@@ -88,6 +88,7 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 		let initDone: (value?: void | PromiseLike<void> | undefined) => void = () => {
 			/* void */
 		}
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		let initError: (reason?: any) => void = () => {
 			/* void */
 		}
@@ -365,6 +366,7 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 		})
 
 		return () =>
+			// eslint-disable-next-line @typescript-eslint/no-unused-vars
 			new Promise<Liquid<T>>((resolve, _reject) => {
 				// console.log('Calling pushPull()')
 				pushPull()

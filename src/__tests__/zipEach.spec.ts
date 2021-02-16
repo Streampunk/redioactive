@@ -13,11 +13,11 @@ describe('Zipping multiple streams', () => {
 	test('Zip three streams of equal length is as expected', async () => {
 		const numbers = redio([1, 2, 3])
 		const words = redio(['one', 'two', 'three'])
-		const wordsF = redio(['une', 'deux', 'troix'])
+		const wordsF = redio(['une', 'deux', 'trois'])
 		await expect(numbers.zipEach([words, wordsF]).toArray()).resolves.toEqual([
 			[1, 'one', 'une'],
 			[2, 'two', 'deux'],
-			[3, 'three', 'troix']
+			[3, 'three', 'trois']
 		])
 	})
 	test('Zip three empty streams', async () => {
@@ -29,7 +29,7 @@ describe('Zipping multiple streams', () => {
 	test('Zip three streams of different lengths - shorter first', async () => {
 		const numbers = redio([1, 2])
 		const words = redio(['one', 'two', 'three'])
-		const wordsF = redio(['une', 'deux', 'troix'])
+		const wordsF = redio(['une', 'deux', 'trois'])
 		await expect(numbers.zipEach([words, wordsF]).toArray()).resolves.toEqual([
 			[1, 'one', 'une'],
 			[2, 'two', 'deux']
@@ -38,11 +38,11 @@ describe('Zipping multiple streams', () => {
 	test('Zip three streams of different lengths - shorter second', async () => {
 		const numbers = redio([1, 2, 3])
 		const words = redio(['one', 'two'])
-		const wordsF = redio(['une', 'deux', 'troix'])
+		const wordsF = redio(['une', 'deux', 'trois'])
 		await expect(numbers.zipEach([words, wordsF]).toArray()).resolves.toEqual([
 			[1, 'one', 'une'],
 			[2, 'two', 'deux'],
-			[3, 'troix']
+			[3, 'trois']
 		])
 	})
 	test('Zip three streams of different lengths - shorter third', async () => {
@@ -67,17 +67,17 @@ describe('Zipping multiple streams', () => {
 	test('Zip three streams with one empty - empty first', async () => {
 		const numbers = redio([])
 		const words = redio(['one', 'two', 'three'])
-		const wordsF = redio(['une', 'deux', 'troix'])
+		const wordsF = redio(['une', 'deux', 'trois'])
 		await expect(numbers.zipEach([words, wordsF]).toArray()).resolves.toEqual([])
 	})
 	test('Zip three streams with one empty - empty second', async () => {
 		const numbers = redio([1, 2, 3])
 		const words = redio([])
-		const wordsF = redio(['une', 'deux', 'troix'])
+		const wordsF = redio(['une', 'deux', 'trois'])
 		await expect(numbers.zipEach([words, wordsF]).toArray()).resolves.toEqual([
 			[1, 'une'],
 			[2, 'deux'],
-			[3, 'troix']
+			[3, 'trois']
 		])
 	})
 	test('Zip three streams with one empty - empty third', async () => {
@@ -93,11 +93,11 @@ describe('Zipping multiple streams', () => {
 	test('Zip three streams with big difference in lengths', async () => {
 		const numbers = redio([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
 		const words = redio(['one', 'two', 'three'])
-		const wordsF = redio(['une', 'deux', 'troix'])
+		const wordsF = redio(['une', 'deux', 'trois'])
 		await expect(numbers.zipEach([words, wordsF]).toArray()).resolves.toEqual([
 			[1, 'one', 'une'],
 			[2, 'two', 'deux'],
-			[3, 'three', 'troix'],
+			[3, 'three', 'trois'],
 			// eslint-disable-next-line prettier/prettier
 			[4], [5],	[6], [7],	[8], [9], [10],	[11], [12],	[13], [14], [15]
 		])
