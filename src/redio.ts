@@ -1506,88 +1506,73 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	}
 
 	zipEach<Z>(ys: RedioPipe<Z>[], options?: RedioOptions): RedioPipe<[T, ...Z[]]> {
-		let zLen = ys.length
-		let pipeIds = ys.map((y) => y.fittingId)
+		let pipeIds: number[] = []
 		let pendingT: T | RedioEnd | null = null
-		let pendingZs: (Z | RedioEnd | undefined)[] = Array(zLen).fill(undefined)
+		let pendingZs: (Z | RedioEnd | null)[] = []
 		let tResolver: (tz: Liquid<[T, ...Z[]]> | PromiseLike<Liquid<[T, ...Z[]]>>) => void
-		let zResolvers: ((v: void | PromiseLike<void> | undefined) => void)[] = Array(zLen).fill(
-			undefined
-		)
-		let doUpdate = false
+		let zResolvers: ((v: void | PromiseLike<void> | undefined) => void)[] = []
 
 		function reset(): void {
 			pendingT = null
-			pendingZs.forEach((pz, i) => (pendingZs[i] = isEnd(pz) ? pz : undefined))
-			zResolvers.forEach((zr) => {
-				if (zr) zr()
-			})
-			zResolvers = Array(zLen).fill(undefined)
+			pendingZs.forEach((pz, i) => (pendingZs[i] = isEnd(pz) ? pz : null))
+			zResolvers.forEach((zr) => (zr ? zr() : {}))
+			zResolvers = Array(ys.length).fill(undefined)
 
-			if (doUpdate) {
-				doUpdate = false
-				pendingZs = Array(zLen).fill(undefined)
-				makeSpouts()
+			// check for any changes in the input pipes
+			const newIds = ys.map((y) => y.fittingId)
+			// eslint-disable-next-line prettier/prettier
+			if (!(newIds.length === pipeIds.length &&	newIds.reduce((acc, cid, i) => acc && cid === pipeIds[i], true))) {
+				// if a pipe has gone away, remove it from the pending array
+				pipeIds.forEach((pid, i) =>
+					!newIds.find((nid) => nid === pid) ? pendingZs.splice(i, 1) : {}
+				)
+				// if a new pipe is found, insert a pending entry and make a spout for it
+				ys.forEach((y, i) => {
+					if (!pipeIds.find((pid) => y.fittingId === pid)) {
+						pendingZs = pendingZs.slice(0, i).concat([null], pendingZs.slice(i))
+						makeSpout(y)
+					}
+				})
+				pipeIds = newIds
 			}
 		}
 
-		function checkUpdate(): void {
-			const curIds = ys.map((y) => {
-				if (!pipeIds.find((id) => y.fittingId === id)) doUpdate = true
-				return y.fittingId
-			})
-			pipeIds = curIds
-
-			if (ys.length !== zLen) {
-				// console.log(
-				// 	`${ys.length > zLen ? 'In' : 'De'}crease zipEach array length ${zLen} -> ${ys.length}`
-				// )
-				zLen = ys.length
-				doUpdate = true
-			}
-		}
-
-		function makeSpouts(): void {
-			ys.forEach((pipe) => {
-				if ((pipe as RedioProducer<Z>)._followers.length === 0) {
-					pipe.spout((z: Z | RedioEnd) => {
-						const zIndex = pipeIds.findIndex((id) => pipe.fittingId === id)
-						if (pendingZs[zIndex] === undefined) {
-							pendingZs[zIndex] = z
+		const makeSpout = (pipe: RedioPipe<Z>) => {
+			pipe.spout((z: Z | RedioEnd) => {
+				const zIndex = pipeIds.findIndex((id) => pipe.fittingId === id)
+				if (zIndex < 0) return
+				else if (pendingZs[zIndex] === null) {
+					pendingZs[zIndex] = z
+				} else {
+					if (isEnd(z) && isEnd(pendingZs[zIndex])) {
+						zResolvers[zIndex]()
+					} else {
+						tResolver([pendingT as T, ...(pendingZs as Z[])])
+						reset()
+						pendingZs[zIndex] = z
+					}
+				}
+				return new Promise<void>((resolve) => {
+					zResolvers[zIndex] = resolve
+					if (pendingT) {
+						if (isEnd(pendingT)) {
+							tResolver(end)
+							reset()
 						} else {
-							if (isEnd(z) && isEnd(pendingZs[zIndex])) {
-								zResolvers[zIndex]()
-							} else {
-								console.log('resolve with pending Z')
-								tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
+							if (pendingZs.reduce((acc, pz) => acc && pz !== null, true)) {
+								tResolver([pendingT as T, ...(pendingZs as Z[])])
 								reset()
-								pendingZs[zIndex] = z
 							}
 						}
-						return new Promise<void>((resolve) => {
-							zResolvers[zIndex] = resolve
-							if (pendingT) {
-								if (isEnd(pendingT)) {
-									tResolver(end)
-									reset()
-								} else {
-									if (pendingZs.reduce((acc, pz) => acc && pz !== undefined, true)) {
-										tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
-										reset()
-									}
-								}
-							}
-						})
-					})
-				}
+					}
+				})
 			})
 		}
-		makeSpouts()
+		reset()
 
 		return this.valve<[T, ...Z[]]>((t: T | RedioEnd): Promise<Liquid<[T, ...Z[]]>> => {
 			return new Promise<Liquid<[T, ...Z[]]>>((resolve) => {
 				tResolver = resolve
-				checkUpdate()
 				if (pendingT === null) {
 					pendingT = t
 					if (pendingZs.length === 0 || isEnd(pendingT)) {
@@ -1605,18 +1590,18 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 						tResolver(nil)
 					} else {
 						console.log('resolve with pending T')
-						tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
+						tResolver([pendingT as T, ...(pendingZs as Z[])])
 						pendingT = t
 					}
 				}
 
-				if (pendingZs.reduce((acc, pz) => acc || pz !== undefined, false)) {
+				if (pendingZs.reduce((acc, pz) => acc || pz !== null, false)) {
 					if (isEnd(pendingT)) {
 						tResolver(end)
 						pendingT = null
 					} else {
-						if (pendingZs.reduce((acc, pz) => acc && pz !== undefined, true)) {
-							tResolver([pendingT as T, ...(pendingZs as Z[]).filter((pz) => !isEnd(pz))])
+						if (pendingZs.reduce((acc, pz) => acc && pz !== null, true)) {
+							tResolver([pendingT as T, ...(pendingZs as Z[])])
 							reset()
 						}
 					}
