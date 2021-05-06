@@ -1510,30 +1510,35 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		let pendingT: T | RedioEnd | null = null
 		let pendingZs: (Z | RedioEnd | null)[] = []
 		let tResolver: (tz: Liquid<[T, ...Z[]]> | PromiseLike<Liquid<[T, ...Z[]]>>) => void
-		let zResolvers: ((v: void | PromiseLike<void> | undefined) => void)[] = []
+		let zResolvers: ((v: void | PromiseLike<void>) => void)[] = []
 
 		function reset(): void {
 			pendingT = null
 			pendingZs.forEach((pz, i) => (pendingZs[i] = isEnd(pz) ? pz : null))
-			zResolvers.forEach((zr) => (zr ? zr() : {}))
-			zResolvers = Array(ys.length).fill(undefined)
+			zResolvers.forEach((zr) => zr())
 
 			// check for any changes in the input pipes
 			const newIds = ys.map((y) => y.fittingId)
+			const newPendingZs: (Z | RedioEnd | null)[] = []
+			const newZResolvers: ((v: void | PromiseLike<void>) => void)[] = []
 			// eslint-disable-next-line prettier/prettier
-			if (!(newIds.length === pipeIds.length &&	newIds.reduce((acc, cid, i) => acc && cid === pipeIds[i], true))) {
-				// if a pipe has gone away, remove it from the pending array
-				pipeIds.forEach((pid, i) =>
-					!newIds.find((nid) => nid === pid) ? pendingZs.splice(i, 1) : {}
-				)
-				// if a new pipe is found, insert a pending entry and make a spout for it
-				ys.forEach((y, i) => {
-					if (!pipeIds.find((pid) => y.fittingId === pid)) {
-						pendingZs = pendingZs.slice(0, i).concat([null], pendingZs.slice(i))
-						makeSpout(y)
+			if (!(newIds.length === pipeIds.length &&	newIds.reduce((acc, nid, i) => acc && nid === pipeIds[i], true))) {
+				// if a pipe has appeared, moved or gone away, update the pending array and the zResolver array
+				newIds.forEach((nid, i) => {
+					const fid = pipeIds.findIndex((pid) => pid === nid)
+					if (fid >= 0) {
+						newPendingZs.push(pendingZs[fid])
+						newZResolvers.push(zResolvers[fid])
+					} else {
+						newPendingZs.push(null)
+						// eslint-disable-next-line @typescript-eslint/no-empty-function
+						newZResolvers.push(() => {})
+						makeSpout(ys[i])
 					}
 				})
 				pipeIds = newIds
+				pendingZs = newPendingZs
+				zResolvers = newZResolvers
 			}
 		}
 

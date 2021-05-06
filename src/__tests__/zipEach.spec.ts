@@ -1,4 +1,4 @@
-import redio, { Funnel, end } from '../redio'
+import redio, { Funnel, end, Valve, RedioEnd, isValue, nil } from '../redio'
 
 describe('Zipping multiple streams', () => {
 	test('Zip two streams of equal length is as expected', async () => {
@@ -128,6 +128,59 @@ describe('Zipping multiple streams', () => {
 			[1, 'one'],
 			[2, 'two'],
 			[3, 'three']
+		])
+	})
+
+	test('Zip with change of source stream', async () => {
+		const numbers = redio([1, 2, 3, 4, 5, 6, 7, 8], { bufferSizeMax: 2 })
+		const wordsEN = redio(['one', 'two', 'three'], { bufferSizeMax: 1 })
+		const wordsFR = redio(['une', 'deux', 'trois'], { bufferSizeMax: 1 })
+
+		let switched = false
+		const sourcePipes = [wordsEN]
+
+		const endValve: Valve<
+			[number | RedioEnd, ...(string | RedioEnd)[]],
+			[number | RedioEnd, ...(string | RedioEnd)[]]
+		> = async (frames) => {
+			if (isValue(frames)) {
+				// console.log('end valve:', frames, frames.length)
+				if (frames.reduce((acc, f) => acc && isValue(f), true)) {
+					return frames
+				}
+				if (!switched) {
+					// a source has ended, switch to new source
+					sourcePipes.splice(0)
+					sourcePipes.push(wordsFR)
+				}
+				switched = true
+				return nil //[frames[0], ...[]]
+			} else {
+				return frames
+			}
+		}
+		const strValve: Valve<
+			[number | RedioEnd, ...(string | RedioEnd)[]],
+			[number | RedioEnd, ...(string | RedioEnd)[]]
+		> = async (frames) => {
+			if (isValue(frames)) {
+				// console.log('str valve:', frames)
+				return frames
+			} else {
+				return frames
+			}
+		}
+
+		const pipe = numbers.zipEach(sourcePipes).valve(endValve).valve(strValve)
+		await expect(pipe.toArray()).resolves.toEqual([
+			[1, 'one'],
+			[2, 'two'],
+			[3, 'three'],
+			// [4],
+			// [5],
+			[6, 'une'],
+			[7, 'deux'],
+			[8, 'trois']
 		])
 	})
 })
