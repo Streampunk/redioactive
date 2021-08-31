@@ -656,6 +656,12 @@ export interface RedioPipe<T> extends PipeFitting {
 	 *  @returns A stream that is one forked branch of the source stream.
 	 */
 	fork(options?: RedioOptions): RedioPipe<T>
+	/**
+	 * Remove the stream ys as a fork of the source stream
+	 * The disconnected stream will have end pushed so that it will exit
+	 * @param ys The stream to be disconnected
+	 */
+	unfork(ys: RedioPipe<T>): void
 	merge<M>(options?: RedioOptions): RedioPipe<M>
 	observe(options?: RedioOptions): RedioPipe<T>
 	otherwise<O>(ys: RedioPipe<O> | (() => RedioPipe<O>), options?: RedioOptions): RedioPipe<T | O>
@@ -824,6 +830,14 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	}
 
 	pull(puller: PipeFitting): Liquid<T> {
+		if (this._followers.length && !this._followers.find((f) => f.fittingId === puller.fittingId)) {
+			if (this._debug) {
+				// eslint-disable-next-line prettier/prettier
+				console.log('Non-follower pull in fitting', this.fittingId, 'to destination', puller.fittingId, 'followers:', this._followers.map((f) => f.fittingId))
+			}
+			process.nextTick(() => this._followers.forEach((follower) => follower.next()))
+			return nil
+		}
 		const provideVal = !this._pullCheck.has(puller.fittingId)
 		if (!provideVal) {
 			if (this._debug) {
@@ -1068,14 +1082,12 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 	}
 
 	doto(f: (t: T) => Promise<void> | void, _options?: RedioOptions): RedioPipe<T> {
-		return this.valve(
-			(t: Liquid<T>): Liquid<T> => {
-				if (isValue(t)) {
-					f(t)
-				}
-				return t
+		return this.valve((t: Liquid<T>): Liquid<T> => {
+			if (isValue(t)) {
+				f(t)
 			}
-		)
+			return t
+		})
 	}
 
 	drop(num?: number | Promise<number>, options?: RedioOptions): RedioPipe<T> {
@@ -1353,6 +1365,22 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 		return identity
 	}
 
+	unfork(ys: RedioPipe<T>): void {
+		let found = false
+		this._followers = this._followers.filter((f) => {
+			if (!found) found = f.fittingId === ys.fittingId
+			return f.fittingId !== ys.fittingId
+		})
+		if (found) {
+			this._lastVal.delete(ys.fittingId)
+			this._pullCheck.delete(ys.fittingId)
+			const yp = ys as RedioProducer<T>
+			yp.push(end)
+		} else {
+			throw new Error('Failed to find requested follower to unfork')
+		}
+	}
+
 	merge<M>(_options?: RedioOptions): RedioPipe<M> {
 		throw new Error('Not implemented')
 	}
@@ -1389,7 +1417,7 @@ abstract class RedioProducer<T> extends RedioFitting implements RedioPipe<T> {
 						resolve()
 					} else {
 						outEnded = false
-						nextSpout((t as unknown) as RedioPipe<S>)
+						nextSpout(t as unknown as RedioPipe<S>)
 						streamResolver = resolve
 					}
 				})
@@ -1699,7 +1727,7 @@ class RedioStart<T> extends RedioProducer<T> {
 						result.forEach((x) => isValue(x) && this.push(x))
 					} else {
 						// Odd situation where T is an Array<X>
-						this.push((result as unknown) as T)
+						this.push(result as unknown as T)
 					}
 				} else if (isNil(result)) {
 					// Don't push
@@ -1785,7 +1813,7 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 							}
 						} else {
 							// Odd situation where T is an Array<X>
-							this.push((result as unknown) as T)
+							this.push(result as unknown as T)
 						}
 						if (isEnd(v) && result.length > 0 && !isEnd(result[result.length - 1])) {
 							this.push(end)

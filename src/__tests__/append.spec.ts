@@ -7,10 +7,7 @@ describe('Appending values to stream', () => {
 
 	test('Appends a single resolved value', async () => {
 		await expect(redio([1, 2, 3]).append(Promise.resolve(4)).toArray()).resolves.toEqual([
-			1,
-			2,
-			3,
-			4
+			1, 2, 3, 4
 		])
 	})
 
@@ -20,12 +17,7 @@ describe('Appending values to stream', () => {
 
 	test('Appends multiple values', async () => {
 		await expect(redio([1, 2, 3]).append(4).append(5).append(6).toArray()).resolves.toEqual([
-			1,
-			2,
-			3,
-			4,
-			5,
-			6
+			1, 2, 3, 4, 5, 6
 		])
 	})
 })

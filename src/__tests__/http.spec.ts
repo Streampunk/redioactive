@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import redio, { Funnel, end, Liquid } from '../redio'
 import got from 'got'
 
@@ -610,8 +611,8 @@ describe('Receive an HTTP push stream', () => {
 		server.on('request', (req: IncomingMessage, res: ServerResponse) => {
 			console.log(`Received request ${res.statusCode}, ${req.url}`)
 			req.on('data', c => { console.log(c.length) })
-			req.on('end', () => { 
-				console.log('Request read') 
+			req.on('end', () => {
+				console.log('Request read')
 				res.end()
 			})
 			// res.end()

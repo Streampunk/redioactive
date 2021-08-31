@@ -64,7 +64,7 @@ describe('Testing sequences of pipes', () => {
 	function innerGenny(length: number, delay: number): Funnel<number> {
 		let lengthCount = 0
 		return () =>
-			new Promise<Liquid<number>>((resolve, _reject) => {
+			new Promise<Liquid<number>>((resolve) => {
 				if (lengthCount++ >= length) {
 					resolve(end)
 				} else {
@@ -77,7 +77,7 @@ describe('Testing sequences of pipes', () => {
 	function genny(streams: number, delay: number): Funnel<RedioPipe<number>> {
 		let streamCount = 0
 		return () =>
-			new Promise<Liquid<RedioPipe<number>>>((resolve, _reject) => {
+			new Promise<Liquid<RedioPipe<number>>>((resolve) => {
 				if (streamCount++ >= streams) {
 					resolve(end)
 				} else {

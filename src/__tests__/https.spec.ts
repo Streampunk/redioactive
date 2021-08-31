@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import redio, { Funnel, Liquid, end } from '../redio'
 import got from 'got'
 import { ServerOptions, RequestOptions } from 'https'

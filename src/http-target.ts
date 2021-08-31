@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-extra-semi */
 import { HTTPOptions, Funnel, Liquid, literal, end } from './redio'
 import { ProtocolType, IdType, DeltaType, BodyType } from './http-common'
 import http, { Server, createServer, IncomingMessage, ServerResponse } from 'http'

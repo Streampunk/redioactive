@@ -24,8 +24,7 @@ describe('Taking values from the start of the stream', () => {
 	})
 	test('Can be chained', async () => {
 		await expect(redio([1, 2, 3, 4]).take(3).take(Promise.resolve(2)).toArray()).resolves.toEqual([
-			1,
-			2
+			1, 2
 		])
 	})
 })

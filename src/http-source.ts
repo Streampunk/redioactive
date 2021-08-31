@@ -20,6 +20,7 @@ interface BagOf<T> {
 	nextId: string | number
 	prevId: string | number
 	nextFn: () => void
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	errorFn: (reason?: any) => void
 }
 

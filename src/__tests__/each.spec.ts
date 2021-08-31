@@ -28,11 +28,9 @@ describe('Test the each processing of values', () => {
 		expect(mockDone).toHaveBeenCalledTimes(1)
 	})
 	test('Each and async work', async () => {
-		const wait = jest.fn(
-			(t: number): Promise<void> => {
-				return new Promise((resolve) => setTimeout(resolve, t))
-			}
-		)
+		const wait = jest.fn((t: number): Promise<void> => {
+			return new Promise((resolve) => setTimeout(resolve, t))
+		})
 		await redio([100, 200, 300, 400]).each(wait, { debug: false }).toPromise()
 		expect(wait).toHaveBeenCalledTimes(4)
 		expect(wait).toHaveBeenLastCalledWith(400)

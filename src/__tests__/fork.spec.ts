@@ -67,4 +67,23 @@ describe('Forking values in a stream', () => {
 			[1, 2, 3, 4, 5, 6]
 		])
 	}, 1000)
+	test('Async single fork & unfork', async () => {
+		const src = redio([1, 2, 3, 4, 5, 6])
+		const f1 = src.fork({ bufferSizeMax: 1 })
+		const f1Result = toArrayWait(f1, 10)
+
+		const result = await new Promise((resolve) => {
+			setTimeout(() => {
+				const f2 = src.fork({ bufferSizeMax: 1 })
+				setTimeout(() => src.unfork(f2), 10)
+
+				resolve(Promise.all([f1Result, toArrayWait(f2, 4)]))
+			}, 10)
+		})
+
+		expect(result).toEqual([
+			[1, 2, 3, 4, 5, 6],
+			[3, 4]
+		])
+	})
 })

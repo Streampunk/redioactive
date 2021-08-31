@@ -18,6 +18,7 @@ describe('Testing flat mapping of a stream to streams', () => {
 	test('Empty out a stream', async () => {
 		await expect(
 			redio([1, 2, 3])
+				// eslint-disable-next-line @typescript-eslint/no-unused-vars
 				.flatMap((_x) => redio([]))
 				.toArray()
 		).resolves.toEqual([])
