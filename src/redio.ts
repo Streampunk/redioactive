@@ -1737,7 +1737,8 @@ class RedioStart<T> extends RedioProducer<T> {
 				if (result !== end && !(Array.isArray(result) && result.some(isEnd))) {
 					process.nextTick(() => this.next())
 				}
-			} catch (err) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} catch (err: any) {
 				this.push(isAnError(err) ? err : new Error(err.toString()))
 				process.nextTick(() => this.next())
 			}
@@ -1832,7 +1833,8 @@ class RedioMiddle<S, T> extends RedioProducer<T> {
 							this.push(end)
 						}
 					}
-				} catch (err) {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				} catch (err: any) {
 					this.push(isAnError(err) ? err : new Error(err.toString()))
 				} finally {
 					if (this._debug) {
@@ -1967,7 +1969,8 @@ class RedioSink<T> extends RedioFitting implements RedioStream<T> {
 			if (!isNil(v)) {
 				try {
 					await this._sinker(v)
-				} catch (err) {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				} catch (err: any) {
 					let handled = false
 					const latestError = isAnError(err) ? err : new Error(err.toString())
 					if (this._errorFn) {

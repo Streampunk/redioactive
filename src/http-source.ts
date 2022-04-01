@@ -420,7 +420,8 @@ export function httpSource<T>(uri: string, options?: HTTPOptions): Spout<T> {
 					isPull(info) && info.httpPort && delete servers[info.httpPort]
 					isPull(info) && info.httpsPort && delete serversS[info.httpsPort]
 				}
-			} catch (err) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} catch (err: any) {
 				console.error(
 					`Redioactive: HTTP source: error closing ${info.protocol} ${info.type} stream: ${err.message}`
 				)

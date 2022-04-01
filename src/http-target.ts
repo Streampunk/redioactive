@@ -609,7 +609,8 @@ export function httpTarget<T>(uri: string, options?: HTTPOptions): Funnel<T> {
 					isPush(info) && info.httpPort && delete servers[info.httpPort]
 					isPush(info) && info.httpsPort && delete serversS[info.httpsPort]
 				}
-			} catch (err) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} catch (err: any) {
 				console.error(
 					`Redioactive: HTTP/S target: error closing ${info.protocol} ${info.type} stream: ${err.message}`
 				)
